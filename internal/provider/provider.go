@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	backenddoltlite "github.com/steveyegge/beads/backend/doltlite"
 	backendplugin "github.com/steveyegge/beads/backend/plugin"
@@ -167,6 +168,30 @@ func (s *Session) GetAllConfig(ctx context.Context) (map[string]string, error) {
 	return s.Store.GetAllConfig(ctx)
 }
 
+func (s *Session) DeleteConfig(ctx context.Context, key string) error {
+	return s.Store.DeleteConfig(ctx, key)
+}
+
+func (s *Session) GetCustomStatuses(ctx context.Context) ([]string, error) {
+	return s.Store.GetCustomStatuses(ctx)
+}
+
+func (s *Session) GetCustomStatusesDetailed(ctx context.Context) ([]backendplugin.CustomStatus, error) {
+	return s.Store.GetCustomStatusesDetailed(ctx)
+}
+
+func (s *Session) GetCustomTypes(ctx context.Context) ([]string, error) {
+	return s.Store.GetCustomTypes(ctx)
+}
+
+func (s *Session) GetInfraTypes(ctx context.Context) map[string]bool {
+	return s.Store.GetInfraTypes(ctx)
+}
+
+func (s *Session) IsInfraTypeCtx(ctx context.Context, t backendplugin.IssueType) bool {
+	return s.Store.IsInfraTypeCtx(ctx, t)
+}
+
 func (s *Session) SetMetadata(ctx context.Context, key, value string) error {
 	return s.Store.SetMetadata(ctx, key, value)
 }
@@ -205,8 +230,40 @@ func (s *Session) CreateIssue(ctx context.Context, issue *backendplugin.Issue, a
 	return s.Store.GetIssue(ctx, issue.ID)
 }
 
+func (s *Session) CreateIssues(ctx context.Context, issues []*backendplugin.Issue, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	for _, issue := range issues {
+		if issue != nil {
+			withDefaults(issue)
+		}
+	}
+	return s.Store.CreateIssues(ctx, issues, actor)
+}
+
+func (s *Session) CreateIssuesWithFullOptions(ctx context.Context, issues []*backendplugin.Issue, actor string, opts backendplugin.BatchCreateOptions) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	for _, issue := range issues {
+		if issue != nil {
+			withDefaults(issue)
+		}
+	}
+	return s.Store.CreateIssuesWithFullOptions(ctx, issues, actor, opts)
+}
+
 func (s *Session) GetIssue(ctx context.Context, id string) (*backendplugin.Issue, error) {
 	return s.Store.GetIssue(ctx, id)
+}
+
+func (s *Session) GetIssueByExternalRef(ctx context.Context, externalRef string) (*backendplugin.Issue, error) {
+	return s.Store.GetIssueByExternalRef(ctx, externalRef)
+}
+
+func (s *Session) GetIssuesByIDs(ctx context.Context, ids []string) ([]*backendplugin.Issue, error) {
+	return s.Store.GetIssuesByIDs(ctx, ids)
 }
 
 func (s *Session) SearchIssues(ctx context.Context, query string, filter backendplugin.IssueFilter) ([]*backendplugin.Issue, error) {
@@ -231,6 +288,119 @@ func (s *Session) UpdateIssue(ctx context.Context, id string, updates map[string
 	return s.Store.GetIssue(ctx, id)
 }
 
+func (s *Session) ReopenIssue(ctx context.Context, id, reason, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.ReopenIssue(ctx, id, reason, actor)
+}
+
+func (s *Session) UpdateIssueType(ctx context.Context, id, issueType, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.UpdateIssueType(ctx, id, issueType, actor)
+}
+
+func (s *Session) CloseIssue(ctx context.Context, id, reason, actor, session string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.CloseIssue(ctx, id, reason, actor, session)
+}
+
+func (s *Session) DeleteIssue(ctx context.Context, id string) error {
+	return s.Store.DeleteIssue(ctx, id)
+}
+
+func (s *Session) DeleteIssues(ctx context.Context, ids []string, cascade, force, dryRun bool) (*backendplugin.DeleteIssuesResult, error) {
+	return s.Store.DeleteIssues(ctx, ids, cascade, force, dryRun)
+}
+
+func (s *Session) DeleteIssuesBySourceRepo(ctx context.Context, sourceRepo string) (int, error) {
+	return s.Store.DeleteIssuesBySourceRepo(ctx, sourceRepo)
+}
+
+func (s *Session) UpdateIssueID(ctx context.Context, oldID, newID string, issue *backendplugin.Issue, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.UpdateIssueID(ctx, oldID, newID, issue, actor)
+}
+
+func (s *Session) ClaimIssue(ctx context.Context, id, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.ClaimIssue(ctx, id, actor)
+}
+
+func (s *Session) ClaimReadyIssue(ctx context.Context, filter backendplugin.WorkFilter, actor string) (*backendplugin.Issue, error) {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.ClaimReadyIssue(ctx, filter, actor)
+}
+
+func (s *Session) HeartbeatIssue(ctx context.Context, id, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.HeartbeatIssue(ctx, id, actor)
+}
+
+func (s *Session) ReclaimExpiredLeases(ctx context.Context, olderThan time.Duration, actor string) ([]backendplugin.ReclaimedLease, error) {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.ReclaimExpiredLeases(ctx, olderThan, actor)
+}
+
+func (s *Session) PromoteFromEphemeral(ctx context.Context, id, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.PromoteFromEphemeral(ctx, id, actor)
+}
+
+func (s *Session) GetNextChildID(ctx context.Context, parentID string) (string, error) {
+	return s.Store.GetNextChildID(ctx, parentID)
+}
+
+func (s *Session) RenameCounterPrefix(ctx context.Context, oldPrefix, newPrefix string) error {
+	return s.Store.RenameCounterPrefix(ctx, oldPrefix, newPrefix)
+}
+
+func (s *Session) RenameDependencyPrefix(ctx context.Context, oldPrefix, newPrefix string) error {
+	return s.Store.RenameDependencyPrefix(ctx, oldPrefix, newPrefix)
+}
+
+func (s *Session) AddDependency(ctx context.Context, dep *backendplugin.Dependency, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.AddDependency(ctx, dep, actor)
+}
+
+func (s *Session) RemoveDependency(ctx context.Context, issueID, dependsOnID, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.RemoveDependency(ctx, issueID, dependsOnID, actor)
+}
+
+func (s *Session) GetDependencies(ctx context.Context, id string) ([]*backendplugin.Issue, error) {
+	return s.Store.GetDependencies(ctx, id)
+}
+
+func (s *Session) GetDependents(ctx context.Context, id string) ([]*backendplugin.Issue, error) {
+	return s.Store.GetDependents(ctx, id)
+}
+
+func (s *Session) GetDependencyTree(ctx context.Context, id string, maxDepth int, showAllPaths, reverse bool) ([]*backendplugin.TreeNode, error) {
+	return s.Store.GetDependencyTree(ctx, id, maxDepth, showAllPaths, reverse)
+}
+
 func (s *Session) AddLabel(ctx context.Context, id, label, actor string, commit bool, message string) ([]string, error) {
 	if actor == "" {
 		actor = "bd-backend-doltlite"
@@ -249,8 +419,19 @@ func (s *Session) AddLabel(ctx context.Context, id, label, actor string, commit 
 	return s.Store.GetLabels(ctx, id)
 }
 
+func (s *Session) RemoveLabel(ctx context.Context, id, label, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.RemoveLabel(ctx, id, label, actor)
+}
+
 func (s *Session) GetLabels(ctx context.Context, id string) ([]string, error) {
 	return s.Store.GetLabels(ctx, id)
+}
+
+func (s *Session) GetIssuesByLabel(ctx context.Context, label string) ([]*backendplugin.Issue, error) {
+	return s.Store.GetIssuesByLabel(ctx, label)
 }
 
 func (s *Session) GetDependenciesWithMetadata(ctx context.Context, id string) ([]*backendplugin.IssueWithDependencyMetadata, error) {
@@ -269,16 +450,400 @@ func (s *Session) GetDependencyRecordsForIssues(ctx context.Context, ids []strin
 	return s.Store.GetDependencyRecordsForIssues(ctx, ids)
 }
 
+func (s *Session) GetAllDependencyRecords(ctx context.Context) (map[string][]*backendplugin.Dependency, error) {
+	return s.Store.GetAllDependencyRecords(ctx)
+}
+
+func (s *Session) GetDependencyCounts(ctx context.Context, ids []string) (map[string]*backendplugin.DependencyCounts, error) {
+	return s.Store.GetDependencyCounts(ctx, ids)
+}
+
+func (s *Session) GetBlockingInfoForIssues(ctx context.Context, ids []string) (map[string][]string, map[string][]string, map[string]string, error) {
+	return s.Store.GetBlockingInfoForIssues(ctx, ids)
+}
+
+func (s *Session) IsBlocked(ctx context.Context, id string) (bool, []string, error) {
+	return s.Store.IsBlocked(ctx, id)
+}
+
+func (s *Session) GetNewlyUnblockedByClose(ctx context.Context, id string) ([]*backendplugin.Issue, error) {
+	return s.Store.GetNewlyUnblockedByClose(ctx, id)
+}
+
+func (s *Session) DetectCycles(ctx context.Context) ([][]*backendplugin.Issue, error) {
+	return s.Store.DetectCycles(ctx)
+}
+
+func (s *Session) FindWispDependentsRecursive(ctx context.Context, ids []string) (map[string]bool, error) {
+	return s.Store.FindWispDependentsRecursive(ctx, ids)
+}
+
+func (s *Session) CountDependentsByStatus(ctx context.Context, id string, status backendplugin.Status) (int64, error) {
+	return s.Store.CountDependentsByStatus(ctx, id, status)
+}
+
+func (s *Session) AddIssueComment(ctx context.Context, id, author, text string) (*backendplugin.Comment, error) {
+	if author == "" {
+		author = "bd-backend-doltlite"
+	}
+	return s.Store.AddIssueComment(ctx, id, author, text)
+}
+
+func (s *Session) AddComment(ctx context.Context, id, actor, comment string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.AddComment(ctx, id, actor, comment)
+}
+
+func (s *Session) ImportIssueComment(ctx context.Context, id, author, text string, createdAt time.Time) (*backendplugin.Comment, error) {
+	if author == "" {
+		author = "bd-backend-doltlite"
+	}
+	return s.Store.ImportIssueComment(ctx, id, author, text, createdAt)
+}
+
 func (s *Session) GetIssueComments(ctx context.Context, id string) ([]*backendplugin.Comment, error) {
 	return s.Store.GetIssueComments(ctx, id)
+}
+
+func (s *Session) GetCommentCounts(ctx context.Context, ids []string) (map[string]int, error) {
+	return s.Store.GetCommentCounts(ctx, ids)
+}
+
+func (s *Session) GetCommentsForIssues(ctx context.Context, ids []string) (map[string][]*backendplugin.Comment, error) {
+	return s.Store.GetCommentsForIssues(ctx, ids)
+}
+
+func (s *Session) GetLabelsForIssues(ctx context.Context, ids []string) (map[string][]string, error) {
+	return s.Store.GetLabelsForIssues(ctx, ids)
+}
+
+func (s *Session) GetEvents(ctx context.Context, id string, limit int) ([]*backendplugin.Event, error) {
+	return s.Store.GetEvents(ctx, id, limit)
+}
+
+func (s *Session) GetAllEventsSince(ctx context.Context, since time.Time) ([]*backendplugin.Event, error) {
+	return s.Store.GetAllEventsSince(ctx, since)
 }
 
 func (s *Session) ReadyWork(ctx context.Context, filter backendplugin.WorkFilter) ([]*backendplugin.Issue, error) {
 	return s.Store.GetReadyWork(ctx, filter)
 }
 
+func (s *Session) ReadyWorkWithCounts(ctx context.Context, filter backendplugin.WorkFilter) ([]*backendplugin.IssueWithCounts, error) {
+	return s.Store.GetReadyWorkWithCounts(ctx, filter)
+}
+
+func (s *Session) BlockedIssues(ctx context.Context, filter backendplugin.WorkFilter) ([]*backendplugin.BlockedIssue, error) {
+	return s.Store.GetBlockedIssues(ctx, filter)
+}
+
+func (s *Session) EpicsEligibleForClosure(ctx context.Context) ([]*backendplugin.EpicStatus, error) {
+	return s.Store.GetEpicsEligibleForClosure(ctx)
+}
+
+func (s *Session) ListWisps(ctx context.Context, filter backendplugin.WispFilter) ([]*backendplugin.Issue, error) {
+	return s.Store.ListWisps(ctx, filter)
+}
+
+func (s *Session) CountIssues(ctx context.Context, query string, filter backendplugin.IssueFilter) (int64, error) {
+	return s.Store.CountIssues(ctx, query, filter)
+}
+
+func (s *Session) CountIssuesByGroup(ctx context.Context, filter backendplugin.IssueFilter, groupBy string) (map[string]int, error) {
+	return s.Store.CountIssuesByGroup(ctx, filter, groupBy)
+}
+
+func (s *Session) CountDependents(ctx context.Context, id string) (int64, error) {
+	return s.Store.CountDependents(ctx, id)
+}
+
+func (s *Session) CountDependencies(ctx context.Context, id string) (int64, error) {
+	return s.Store.CountDependencies(ctx, id)
+}
+
+func (s *Session) CountIssueComments(ctx context.Context, id string) (int64, error) {
+	return s.Store.CountIssueComments(ctx, id)
+}
+
+func (s *Session) CountEvents(ctx context.Context, id string, limit int) (int64, error) {
+	return s.Store.CountEvents(ctx, id, limit)
+}
+
+func (s *Session) Statistics(ctx context.Context) (*backendplugin.Statistics, error) {
+	return s.Store.GetStatistics(ctx)
+}
+
+func (s *Session) GetRepoMtime(ctx context.Context, repoPath string) (int64, error) {
+	return s.Store.GetRepoMtime(ctx, repoPath)
+}
+
+func (s *Session) SetRepoMtime(ctx context.Context, repoPath, jsonlPath string, mtimeNS int64) error {
+	return s.Store.SetRepoMtime(ctx, repoPath, jsonlPath, mtimeNS)
+}
+
+func (s *Session) ClearRepoMtime(ctx context.Context, repoPath string) error {
+	return s.Store.ClearRepoMtime(ctx, repoPath)
+}
+
+func (s *Session) GetMoleculeProgress(ctx context.Context, moleculeID string) (*backendplugin.MoleculeProgressStats, error) {
+	return s.Store.GetMoleculeProgress(ctx, moleculeID)
+}
+
+func (s *Session) GetMoleculeLastActivity(ctx context.Context, moleculeID string) (*backendplugin.MoleculeLastActivity, error) {
+	return s.Store.GetMoleculeLastActivity(ctx, moleculeID)
+}
+
+func (s *Session) GetStaleIssues(ctx context.Context, filter backendplugin.StaleFilter) ([]*backendplugin.Issue, error) {
+	return s.Store.GetStaleIssues(ctx, filter)
+}
+
+func (s *Session) Path() string {
+	return s.Store.Path()
+}
+
+func (s *Session) CLIDir() string {
+	return s.Store.CLIDir()
+}
+
+func (s *Session) DoltGC(ctx context.Context) error {
+	return s.Store.DoltGC(ctx)
+}
+
+func (s *Session) Flatten(ctx context.Context) error {
+	return s.Store.Flatten(ctx)
+}
+
+func (s *Session) Compact(ctx context.Context, initialHash, boundaryHash string, oldCommits int, recentHashes []string) error {
+	return s.Store.Compact(ctx, initialHash, boundaryHash, oldCommits, recentHashes)
+}
+
+func (s *Session) CheckEligibility(ctx context.Context, issueID string, tier int) (bool, string, error) {
+	return s.Store.CheckEligibility(ctx, issueID, tier)
+}
+
+func (s *Session) ApplyCompaction(ctx context.Context, issueID string, tier int, originalSize int, compactedSize int, commitHash string) error {
+	return s.Store.ApplyCompaction(ctx, issueID, tier, originalSize, compactedSize, commitHash)
+}
+
+func (s *Session) SnapshotIssue(ctx context.Context, issueID string, tier int) error {
+	return s.Store.SnapshotIssue(ctx, issueID, tier)
+}
+
+func (s *Session) GetCompactionSnapshot(ctx context.Context, issueID string) (*backendplugin.IssueSnapshot, error) {
+	return s.Store.GetCompactionSnapshot(ctx, issueID)
+}
+
+func (s *Session) RestoreFromSnapshot(ctx context.Context, issueID string) (*backendplugin.IssueSnapshot, error) {
+	return s.Store.RestoreFromSnapshot(ctx, issueID)
+}
+
+func (s *Session) GetTier1Candidates(ctx context.Context) ([]*backendplugin.CompactionCandidate, error) {
+	return s.Store.GetTier1Candidates(ctx)
+}
+
+func (s *Session) GetTier2Candidates(ctx context.Context) ([]*backendplugin.CompactionCandidate, error) {
+	return s.Store.GetTier2Candidates(ctx)
+}
+
+func (s *Session) MergeSlotCreate(ctx context.Context, actor string) (*backendplugin.Issue, error) {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.MergeSlotCreate(ctx, actor)
+}
+
+func (s *Session) MergeSlotCheck(ctx context.Context) (*backendplugin.MergeSlotStatus, error) {
+	return s.Store.MergeSlotCheck(ctx)
+}
+
+func (s *Session) MergeSlotAcquire(ctx context.Context, holder, actor string, wait bool) (*backendplugin.MergeSlotResult, error) {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.MergeSlotAcquire(ctx, holder, actor, wait)
+}
+
+func (s *Session) MergeSlotRelease(ctx context.Context, holder, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.MergeSlotRelease(ctx, holder, actor)
+}
+
+func (s *Session) SlotSet(ctx context.Context, issueID, key, value, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.SlotSet(ctx, issueID, key, value, actor)
+}
+
+func (s *Session) SlotGet(ctx context.Context, issueID, key string) (string, error) {
+	return s.Store.SlotGet(ctx, issueID, key)
+}
+
+func (s *Session) SlotClear(ctx context.Context, issueID, key, actor string) error {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.SlotClear(ctx, issueID, key, actor)
+}
+
 func (s *Session) Commit(ctx context.Context, message string) error {
 	return s.Store.Commit(ctx, message)
+}
+
+func (s *Session) CommitMergeResolution(ctx context.Context, message string) error {
+	return s.Store.CommitMergeResolution(ctx, message)
+}
+
+func (s *Session) CreateBranch(ctx context.Context, name string) error {
+	return s.Store.Branch(ctx, name)
+}
+
+func (s *Session) Checkout(ctx context.Context, branch string) error {
+	return s.Store.Checkout(ctx, branch)
+}
+
+func (s *Session) CurrentBranch(ctx context.Context) (string, error) {
+	return s.Store.CurrentBranch(ctx)
+}
+
+func (s *Session) DeleteBranch(ctx context.Context, branch string) error {
+	return s.Store.DeleteBranch(ctx, branch)
+}
+
+func (s *Session) ListBranches(ctx context.Context) ([]string, error) {
+	return s.Store.ListBranches(ctx)
+}
+
+func (s *Session) CommitExists(ctx context.Context, hash string) (bool, error) {
+	return s.Store.CommitExists(ctx, hash)
+}
+
+func (s *Session) GetCurrentCommit(ctx context.Context) (string, error) {
+	return s.Store.GetCurrentCommit(ctx)
+}
+
+func (s *Session) Status(ctx context.Context) (*backendplugin.VCStatus, error) {
+	return s.Store.Status(ctx)
+}
+
+func (s *Session) Log(ctx context.Context, limit int) ([]backendplugin.CommitInfo, error) {
+	return s.Store.Log(ctx, limit)
+}
+
+func (s *Session) Merge(ctx context.Context, branch string) ([]backendplugin.Conflict, error) {
+	return s.Store.Merge(ctx, branch)
+}
+
+func (s *Session) GetConflicts(ctx context.Context) ([]backendplugin.Conflict, error) {
+	return s.Store.GetConflicts(ctx)
+}
+
+func (s *Session) ResolveConflicts(ctx context.Context, table, strategy string) error {
+	return s.Store.ResolveConflicts(ctx, table, strategy)
+}
+
+func (s *Session) History(ctx context.Context, issueID string) ([]*backendplugin.HistoryEntry, error) {
+	return s.Store.History(ctx, issueID)
+}
+
+func (s *Session) AsOf(ctx context.Context, issueID, ref string) (*backendplugin.Issue, error) {
+	return s.Store.AsOf(ctx, issueID, ref)
+}
+
+func (s *Session) Diff(ctx context.Context, fromRef, toRef string) ([]*backendplugin.DiffEntry, error) {
+	return s.Store.Diff(ctx, fromRef, toRef)
+}
+
+func (s *Session) AddRemote(ctx context.Context, name, url string) error {
+	return s.Store.AddRemote(ctx, name, url)
+}
+
+func (s *Session) RemoveRemote(ctx context.Context, name string) error {
+	return s.Store.RemoveRemote(ctx, name)
+}
+
+func (s *Session) HasRemote(ctx context.Context, name string) (bool, error) {
+	return s.Store.HasRemote(ctx, name)
+}
+
+func (s *Session) ListRemotes(ctx context.Context) ([]backendplugin.RemoteInfo, error) {
+	return s.Store.ListRemotes(ctx)
+}
+
+func (s *Session) Push(ctx context.Context) error {
+	return s.Store.Push(ctx)
+}
+
+func (s *Session) Pull(ctx context.Context) error {
+	return s.Store.Pull(ctx)
+}
+
+func (s *Session) ForcePush(ctx context.Context) error {
+	return s.Store.ForcePush(ctx)
+}
+
+func (s *Session) PushRemote(ctx context.Context, remote string, force bool) error {
+	return s.Store.PushRemote(ctx, remote, force)
+}
+
+func (s *Session) PullRemote(ctx context.Context, remote string) error {
+	return s.Store.PullRemote(ctx, remote)
+}
+
+func (s *Session) Fetch(ctx context.Context, peer string) error {
+	return s.Store.Fetch(ctx, peer)
+}
+
+func (s *Session) PushTo(ctx context.Context, peer string) error {
+	return s.Store.PushTo(ctx, peer)
+}
+
+func (s *Session) PullFrom(ctx context.Context, peer string) ([]backendplugin.Conflict, error) {
+	return s.Store.PullFrom(ctx, peer)
+}
+
+func (s *Session) BackupAdd(ctx context.Context, name, url string) error {
+	return s.Store.BackupAdd(ctx, name, url)
+}
+
+func (s *Session) BackupSync(ctx context.Context, name string) error {
+	return s.Store.BackupSync(ctx, name)
+}
+
+func (s *Session) BackupRemove(ctx context.Context, name string) error {
+	return s.Store.BackupRemove(ctx, name)
+}
+
+func (s *Session) BackupDatabase(ctx context.Context, dir string) error {
+	return s.Store.BackupDatabase(ctx, dir)
+}
+
+func (s *Session) RestoreDatabase(ctx context.Context, dir string, force bool) error {
+	return s.Store.RestoreDatabase(ctx, dir, force)
+}
+
+func (s *Session) AddFederationPeer(ctx context.Context, peer *backendplugin.FederationPeer) error {
+	return s.Store.AddFederationPeer(ctx, peer)
+}
+
+func (s *Session) GetFederationPeer(ctx context.Context, name string) (*backendplugin.FederationPeer, error) {
+	return s.Store.GetFederationPeer(ctx, name)
+}
+
+func (s *Session) ListFederationPeers(ctx context.Context) ([]*backendplugin.FederationPeer, error) {
+	return s.Store.ListFederationPeers(ctx)
+}
+
+func (s *Session) RemoveFederationPeer(ctx context.Context, name string) error {
+	return s.Store.RemoveFederationPeer(ctx, name)
+}
+
+func (s *Session) SyncStatus(ctx context.Context, peer string) (*backendplugin.SyncStatus, error) {
+	return s.Store.SyncStatus(ctx, peer)
 }
 
 func withDefaults(issue *backendplugin.Issue) {

@@ -58,13 +58,21 @@ var errClosed = errors.New("doltlite: store is closed")
 type Option func(*options)
 
 type options struct {
-	lock Unlocker // pre-acquired lock; nil means New acquires its own
+	lock                Unlocker // pre-acquired lock; nil means New acquires its own
+	skipSchemaBootstrap bool
 }
 
 // WithLock passes a pre-acquired exclusive lock to New for schema bootstrap.
 // The caller retains ownership. Normal store operations do not hold this lock.
 func WithLock(lock Unlocker) Option {
 	return func(o *options) { o.lock = lock }
+}
+
+// WithoutSchemaBootstrap opens an already-initialized store without running
+// schema creation, migrations, or compatibility backfills. Callers should use
+// this for normal command opens after bd init has prepared the database.
+func WithoutSchemaBootstrap() Option {
+	return func(o *options) { o.skipSchemaBootstrap = true }
 }
 
 // New creates an DoltliteStore using the doltlite engine.
@@ -100,7 +108,7 @@ func New(ctx context.Context, beadsDir, database, branch string, opts ...Option)
 	}
 
 	lock := o.lock
-	ownsLock := lock == nil
+	ownsLock := lock == nil && !o.skipSchemaBootstrap
 	if ownsLock {
 		var err error
 		lockStart := time.Now()
@@ -117,33 +125,48 @@ func New(ctx context.Context, beadsDir, database, branch string, opts ...Option)
 		branch:   branch,
 	}
 
-	phaseStart := time.Now()
-	err = s.initSchema(ctx)
-	recordPhaseTelemetry(ctx, "init_schema", time.Since(phaseStart))
-	if err != nil {
-		if lock != nil && ownsLock {
-			lock.Unlock()
+	if !o.skipSchemaBootstrap {
+		phaseStart := time.Now()
+		err = s.initSchema(ctx)
+		recordPhaseTelemetry(ctx, "init_schema", time.Since(phaseStart))
+		if err != nil {
+			if lock != nil && ownsLock {
+				lock.Unlock()
+			}
+			return nil, fmt.Errorf("doltlite: init schema: %w", err)
 		}
-		return nil, fmt.Errorf("doltlite: init schema: %w", err)
 	}
 	if lock != nil && ownsLock {
 		lock.Unlock()
 		lock = nil
 	}
-	phaseStart = time.Now()
+	phaseStart := time.Now()
 	err = s.openPersistentDB(ctx)
 	recordPhaseTelemetry(ctx, "open_persistent_db", time.Since(phaseStart))
 	if err != nil {
+		if lock != nil && ownsLock {
+			lock.Unlock()
+		}
 		return nil, fmt.Errorf("doltlite: open database: %w", err)
 	}
 
-	// Backfill custom_types / custom_statuses from config values,
-	// fixing databases where schema migration created empty tables.
-	phaseStart = time.Now()
-	err = s.backfillCustomTables(ctx)
-	recordPhaseTelemetry(ctx, "backfill_custom_tables", time.Since(phaseStart))
-	if err != nil {
-		return nil, fmt.Errorf("doltlite: backfill custom tables: %w", err)
+	if o.skipSchemaBootstrap {
+		phaseStart = time.Now()
+		err = s.validateInitializedSchema(ctx)
+		recordPhaseTelemetry(ctx, "validate_schema", time.Since(phaseStart))
+		if err != nil {
+			_ = s.Close()
+			return nil, err
+		}
+	} else {
+		// Backfill custom_types / custom_statuses from config values,
+		// fixing databases where schema migration created empty tables.
+		phaseStart = time.Now()
+		err = s.backfillCustomTables(ctx)
+		recordPhaseTelemetry(ctx, "backfill_custom_tables", time.Since(phaseStart))
+		if err != nil {
+			return nil, fmt.Errorf("doltlite: backfill custom tables: %w", err)
+		}
 	}
 
 	if s.branch == "" {
@@ -153,12 +176,14 @@ func New(ctx context.Context, beadsDir, database, branch string, opts ...Option)
 		}
 		s.branch = branch
 	}
-	// Ensure dolt_ignore'd wisp tables exist in the working set.
-	// After a clone or branch switch, these tables are absent because
-	// dolt_ignore prevents them from being committed. Server mode handles
-	// this in newServerMode(); embedded mode must do it here. (GH#3270)
-	if err := s.ensureIgnoredTables(ctx); err != nil {
-		return nil, fmt.Errorf("doltlite: ensure ignored tables: %w", err)
+	if !o.skipSchemaBootstrap {
+		// Ensure dolt_ignore'd wisp tables exist in the working set.
+		// After a clone or branch switch, these tables are absent because
+		// dolt_ignore prevents them from being committed. Server mode handles
+		// this in newServerMode(); embedded mode must do it here. (GH#3270)
+		if err := s.ensureIgnoredTables(ctx); err != nil {
+			return nil, fmt.Errorf("doltlite: ensure ignored tables: %w", err)
+		}
 	}
 
 	return s, nil
@@ -181,6 +206,28 @@ func (s *DoltliteStore) openPersistentDB(ctx context.Context) error {
 	}
 	s.db = db
 	s.dbCleanup = cleanup
+	return nil
+}
+
+func (s *DoltliteStore) validateInitializedSchema(ctx context.Context) error {
+	db := s.DB()
+	if db == nil {
+		return fmt.Errorf("doltlite: validate schema: database is not open")
+	}
+	currentVersion, err := schema.CurrentVersion(ctx, db)
+	if err != nil {
+		return fmt.Errorf("doltlite: validate schema: %w", err)
+	}
+	latestVersion := schema.LatestVersion()
+	if currentVersion == 0 {
+		return fmt.Errorf("doltlite: database is not initialized; run bd init")
+	}
+	if currentVersion < latestVersion {
+		return fmt.Errorf("doltlite: schema version %d is behind binary version %d; run bd migrate or bd init", currentVersion, latestVersion)
+	}
+	if currentVersion > latestVersion {
+		return fmt.Errorf("doltlite: schema version %d is ahead of binary version %d", currentVersion, latestVersion)
+	}
 	return nil
 }
 

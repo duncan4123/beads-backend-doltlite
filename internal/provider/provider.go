@@ -90,7 +90,7 @@ func (m *Manager) Init(ctx context.Context, beadsDir, database, branch, prefix, 
 	if actor = strings.TrimSpace(actor); actor == "" {
 		actor = "bd-backend-doltlite"
 	}
-	s, err := m.Open(ctx, beadsDir, database, branch)
+	s, err := m.open(ctx, beadsDir, database, branch, true)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +106,10 @@ func (m *Manager) Init(ctx context.Context, beadsDir, database, branch, prefix, 
 }
 
 func (m *Manager) Open(ctx context.Context, beadsDir, database, branch string) (*Session, error) {
+	return m.open(ctx, beadsDir, database, branch, false)
+}
+
+func (m *Manager) open(ctx context.Context, beadsDir, database, branch string, bootstrap bool) (*Session, error) {
 	if strings.TrimSpace(beadsDir) == "" {
 		return nil, errors.New("beads_dir is required")
 	}
@@ -119,7 +123,11 @@ func (m *Manager) Open(ctx context.Context, beadsDir, database, branch string) (
 	if err != nil {
 		return nil, err
 	}
-	store, err := backenddoltlite.New(ctx, absBeadsDir, database, branch)
+	var opts []backenddoltlite.Option
+	if !bootstrap {
+		opts = append(opts, backenddoltlite.WithoutSchemaBootstrap())
+	}
+	store, err := backenddoltlite.New(ctx, absBeadsDir, database, branch, opts...)
 	if err != nil {
 		return nil, err
 	}

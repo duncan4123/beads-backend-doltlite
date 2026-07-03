@@ -163,6 +163,26 @@ func (s *Session) GetConfig(ctx context.Context, key string) (string, error) {
 	return s.Store.GetConfig(ctx, key)
 }
 
+func (s *Session) GetAllConfig(ctx context.Context) (map[string]string, error) {
+	return s.Store.GetAllConfig(ctx)
+}
+
+func (s *Session) SetMetadata(ctx context.Context, key, value string) error {
+	return s.Store.SetMetadata(ctx, key, value)
+}
+
+func (s *Session) GetMetadata(ctx context.Context, key string) (string, error) {
+	return s.Store.GetMetadata(ctx, key)
+}
+
+func (s *Session) SetLocalMetadata(ctx context.Context, key, value string) error {
+	return s.Store.SetLocalMetadata(ctx, key, value)
+}
+
+func (s *Session) GetLocalMetadata(ctx context.Context, key string) (string, error) {
+	return s.Store.GetLocalMetadata(ctx, key)
+}
+
 func (s *Session) CreateIssue(ctx context.Context, issue *backendplugin.Issue, actor string, commit bool, message string) (*backendplugin.Issue, error) {
 	if issue == nil {
 		return nil, errors.New("issue is required")
@@ -231,6 +251,26 @@ func (s *Session) AddLabel(ctx context.Context, id, label, actor string, commit 
 
 func (s *Session) GetLabels(ctx context.Context, id string) ([]string, error) {
 	return s.Store.GetLabels(ctx, id)
+}
+
+func (s *Session) GetDependenciesWithMetadata(ctx context.Context, id string) ([]*backendplugin.IssueWithDependencyMetadata, error) {
+	return s.Store.GetDependenciesWithMetadata(ctx, id)
+}
+
+func (s *Session) GetDependentsWithMetadata(ctx context.Context, id string) ([]*backendplugin.IssueWithDependencyMetadata, error) {
+	return s.Store.GetDependentsWithMetadata(ctx, id)
+}
+
+func (s *Session) GetDependencyRecords(ctx context.Context, id string) ([]*backendplugin.Dependency, error) {
+	return s.Store.GetDependencyRecords(ctx, id)
+}
+
+func (s *Session) GetDependencyRecordsForIssues(ctx context.Context, ids []string) (map[string][]*backendplugin.Dependency, error) {
+	return s.Store.GetDependencyRecordsForIssues(ctx, ids)
+}
+
+func (s *Session) GetIssueComments(ctx context.Context, id string) ([]*backendplugin.Comment, error) {
+	return s.Store.GetIssueComments(ctx, id)
 }
 
 func (s *Session) ReadyWork(ctx context.Context, filter backendplugin.WorkFilter) ([]*backendplugin.Issue, error) {

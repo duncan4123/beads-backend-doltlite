@@ -139,6 +139,74 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 			return errorResponse(req.ID, "get_config_failed", err)
 		}
 		return ok(req.ID, map[string]string{"key": p.Key, "value": value})
+	case "get_all_config":
+		var p backendplugin.SessionParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		values, err := s.GetAllConfig(ctx)
+		if err != nil {
+			return errorResponse(req.ID, "get_all_config_failed", err)
+		}
+		return ok(req.ID, values)
+	case "set_metadata":
+		var p backendplugin.MetadataParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		if err := s.SetMetadata(ctx, p.Key, p.Value); err != nil {
+			return errorResponse(req.ID, "set_metadata_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key})
+	case "get_metadata":
+		var p backendplugin.MetadataParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		value, err := s.GetMetadata(ctx, p.Key)
+		if err != nil {
+			return errorResponse(req.ID, "get_metadata_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key, "value": value})
+	case "set_local_metadata":
+		var p backendplugin.MetadataParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		if err := s.SetLocalMetadata(ctx, p.Key, p.Value); err != nil {
+			return errorResponse(req.ID, "set_local_metadata_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key})
+	case "get_local_metadata":
+		var p backendplugin.MetadataParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		value, err := s.GetLocalMetadata(ctx, p.Key)
+		if err != nil {
+			return errorResponse(req.ID, "get_local_metadata_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key, "value": value})
 	case "create_issue":
 		var p backendplugin.CreateIssueParams
 		if err := decode(req.Params, &p); err != nil {
@@ -223,6 +291,76 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 			return errorResponse(req.ID, "get_labels_failed", err)
 		}
 		return ok(req.ID, labels)
+	case "get_dependencies_with_metadata":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		deps, err := s.GetDependenciesWithMetadata(ctx, p.ID)
+		if err != nil {
+			return errorResponse(req.ID, "get_dependencies_with_metadata_failed", err)
+		}
+		return ok(req.ID, deps)
+	case "get_dependents_with_metadata":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		deps, err := s.GetDependentsWithMetadata(ctx, p.ID)
+		if err != nil {
+			return errorResponse(req.ID, "get_dependents_with_metadata_failed", err)
+		}
+		return ok(req.ID, deps)
+	case "get_dependency_records":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		deps, err := s.GetDependencyRecords(ctx, p.ID)
+		if err != nil {
+			return errorResponse(req.ID, "get_dependency_records_failed", err)
+		}
+		return ok(req.ID, deps)
+	case "get_dependency_records_for_issues":
+		var p backendplugin.IssueIDsParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		deps, err := s.GetDependencyRecordsForIssues(ctx, p.IDs)
+		if err != nil {
+			return errorResponse(req.ID, "get_dependency_records_for_issues_failed", err)
+		}
+		return ok(req.ID, deps)
+	case "get_issue_comments":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		comments, err := s.GetIssueComments(ctx, p.ID)
+		if err != nil {
+			return errorResponse(req.ID, "get_issue_comments_failed", err)
+		}
+		return ok(req.ID, comments)
 	case "ready_work":
 		var p struct {
 			SessionID string                   `json:"session_id"`

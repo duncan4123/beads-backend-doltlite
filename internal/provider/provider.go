@@ -514,6 +514,13 @@ func (s *Session) HeartbeatIssue(ctx context.Context, id, actor string) error {
 	return s.Store.HeartbeatIssue(ctx, id, actor)
 }
 
+func (s *Session) ReclaimExpiredLeases(ctx context.Context, olderThan time.Duration, actor string) ([]backendplugin.ReclaimedLease, error) {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	return s.Store.ReclaimExpiredLeases(ctx, olderThan, actor)
+}
+
 func (s *Session) PromoteFromEphemeral(ctx context.Context, id, actor string) error {
 	if actor == "" {
 		actor = "bd-backend-doltlite"

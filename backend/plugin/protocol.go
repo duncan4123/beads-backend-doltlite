@@ -35,6 +35,7 @@ type MergeSlotStatus = storage.MergeSlotStatus
 type MoleculeLastActivity = types.MoleculeLastActivity
 type MoleculeProgressStats = types.MoleculeProgressStats
 type RemoteInfo = storage.RemoteInfo
+type ReclaimedLease = types.ReclaimedLease
 type StaleFilter = types.StaleFilter
 type Statistics = types.Statistics
 type SyncStatus = storage.SyncStatus
@@ -266,6 +267,12 @@ type ClaimIssueParams struct {
 	ID        string     `json:"id,omitempty"`
 	Filter    WorkFilter `json:"filter,omitempty"`
 	Actor     string     `json:"actor,omitempty"`
+}
+
+type ReclaimExpiredLeasesParams struct {
+	SessionID string        `json:"session_id"`
+	OlderThan time.Duration `json:"older_than,omitempty"`
+	Actor     string        `json:"actor,omitempty"`
 }
 
 type SearchIssuesParams struct {

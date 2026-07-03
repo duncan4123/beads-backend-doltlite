@@ -13,6 +13,7 @@ import (
 
 	backendplugin "github.com/duncan4123/beads-backend-doltlite/backend/plugin"
 	"github.com/duncan4123/beads-backend-doltlite/internal/provider"
+	doltlitestorage "github.com/duncan4123/beads-backend-doltlite/internal/storage/doltlite"
 )
 
 func main() {
@@ -118,12 +119,14 @@ func serve(ctx context.Context, in *os.File, out *os.File, opts options) error {
 		start := time.Now()
 		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
 			resp := errorResponse("", "bad_request", err)
-			tracer.Log(traceEntryFromResponse(start, req, resp))
+			tracer.Log(traceEntryFromResponse(start, req, resp, doltlitestorage.TelemetrySnapshot{}))
 			_ = enc.Encode(resp)
 			continue
 		}
-		resp := handle(ctx, manager, req)
-		tracer.Log(traceEntryFromResponse(start, req, resp))
+		telemetry := doltlitestorage.NewTelemetry()
+		reqCtx := doltlitestorage.ContextWithTelemetry(ctx, telemetry)
+		resp := handle(reqCtx, manager, req)
+		tracer.Log(traceEntryFromResponse(start, req, resp, telemetry.Snapshot()))
 		if err := enc.Encode(resp); err != nil {
 			return err
 		}
@@ -144,7 +147,16 @@ type traceEntry struct {
 	Method     string `json:"method,omitempty"`
 	OK         bool   `json:"ok"`
 	ErrorCode  string `json:"error_code,omitempty"`
+	Error      string `json:"error,omitempty"`
 	DurationMS int64  `json:"duration_ms"`
+
+	RetryCount      *int             `json:"retry_count,omitempty"`
+	RetryErrorClass string           `json:"retry_error_class,omitempty"`
+	RetryError      string           `json:"retry_error,omitempty"`
+	LockWaitCount   *int             `json:"lock_wait_count,omitempty"`
+	LockWaitMS      *int64           `json:"lock_wait_ms,omitempty"`
+	MaxLockWaitMS   *int64           `json:"max_lock_wait_ms,omitempty"`
+	PhaseMS         map[string]int64 `json:"phase_ms,omitempty"`
 }
 
 func newTracer(opts options) (*tracer, error) {
@@ -197,21 +209,52 @@ type nopWriteCloser struct {
 
 func (nopWriteCloser) Close() error { return nil }
 
-func traceEntryFromResponse(start time.Time, req backendplugin.Request, resp backendplugin.Response) traceEntry {
-	var code string
+func traceEntryFromResponse(start time.Time, req backendplugin.Request, resp backendplugin.Response, telemetry doltlitestorage.TelemetrySnapshot) traceEntry {
+	var code, message string
 	if resp.Error != nil {
 		code = resp.Error.Code
+		message = sanitizeTraceText(resp.Error.Message, 500)
 	}
-	return traceEntry{
-		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
-		PID:        os.Getpid(),
-		Backend:    provider.Name,
-		RequestID:  req.ID,
-		Method:     req.Method,
-		OK:         resp.OK,
-		ErrorCode:  code,
-		DurationMS: time.Since(start).Milliseconds(),
+	entry := traceEntry{
+		Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
+		PID:             os.Getpid(),
+		Backend:         provider.Name,
+		RequestID:       req.ID,
+		Method:          req.Method,
+		OK:              resp.OK,
+		ErrorCode:       code,
+		Error:           message,
+		DurationMS:      time.Since(start).Milliseconds(),
+		RetryErrorClass: telemetry.RetryErrorClass,
+		RetryError:      telemetry.RetryError,
 	}
+	if telemetry.RetryCount > 0 {
+		entry.RetryCount = intPtr(telemetry.RetryCount)
+	}
+	if telemetry.LockWaitCount > 0 {
+		entry.LockWaitCount = intPtr(telemetry.LockWaitCount)
+		entry.LockWaitMS = int64Ptr(telemetry.LockWait.Milliseconds())
+		entry.MaxLockWaitMS = int64Ptr(telemetry.MaxLockWait.Milliseconds())
+	}
+	if len(telemetry.Phases) > 0 {
+		entry.PhaseMS = make(map[string]int64, len(telemetry.Phases))
+		for name, elapsed := range telemetry.Phases {
+			entry.PhaseMS[name] = elapsed.Milliseconds()
+		}
+	}
+	return entry
+}
+
+func intPtr(v int) *int { return &v }
+
+func int64Ptr(v int64) *int64 { return &v }
+
+func sanitizeTraceText(s string, limit int) string {
+	s = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(strings.TrimSpace(s))
+	if limit > 0 && len(s) > limit {
+		return s[:limit] + "..."
+	}
+	return s
 }
 
 func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Request) backendplugin.Response {

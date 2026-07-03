@@ -74,6 +74,11 @@ func WithLock(lock Unlocker) Option {
 // Schema bootstrap is guarded by a short exclusive flock. After bootstrap, the
 // lock is released and normal operations use doltlite's own file-level locks.
 func New(ctx context.Context, beadsDir, database, branch string, opts ...Option) (*DoltliteStore, error) {
+	newStart := time.Now()
+	defer func() {
+		recordPhaseTelemetry(ctx, "new_total", time.Since(newStart))
+	}()
+
 	if database == "" {
 		return nil, fmt.Errorf("doltlite: database name must not be empty (caller should default to %q)", "beads")
 	}
@@ -98,7 +103,9 @@ func New(ctx context.Context, beadsDir, database, branch string, opts ...Option)
 	ownsLock := lock == nil
 	if ownsLock {
 		var err error
+		lockStart := time.Now()
 		lock, err = WaitLock(ctx, dataDir)
+		recordLockWaitTelemetry(ctx, time.Since(lockStart))
 		if err != nil {
 			return nil, err
 		}
@@ -110,7 +117,10 @@ func New(ctx context.Context, beadsDir, database, branch string, opts ...Option)
 		branch:   branch,
 	}
 
-	if err := s.initSchema(ctx); err != nil {
+	phaseStart := time.Now()
+	err = s.initSchema(ctx)
+	recordPhaseTelemetry(ctx, "init_schema", time.Since(phaseStart))
+	if err != nil {
 		if lock != nil && ownsLock {
 			lock.Unlock()
 		}
@@ -120,13 +130,19 @@ func New(ctx context.Context, beadsDir, database, branch string, opts ...Option)
 		lock.Unlock()
 		lock = nil
 	}
-	if err := s.openPersistentDB(ctx); err != nil {
+	phaseStart = time.Now()
+	err = s.openPersistentDB(ctx)
+	recordPhaseTelemetry(ctx, "open_persistent_db", time.Since(phaseStart))
+	if err != nil {
 		return nil, fmt.Errorf("doltlite: open database: %w", err)
 	}
 
 	// Backfill custom_types / custom_statuses from config values,
 	// fixing databases where schema migration created empty tables.
-	if err := s.backfillCustomTables(ctx); err != nil {
+	phaseStart = time.Now()
+	err = s.backfillCustomTables(ctx)
+	recordPhaseTelemetry(ctx, "backfill_custom_tables", time.Since(phaseStart))
+	if err != nil {
 		return nil, fmt.Errorf("doltlite: backfill custom tables: %w", err)
 	}
 
@@ -326,6 +342,7 @@ func (s *DoltliteStore) withRetryAfter(ctx context.Context, fn func() error, aft
 		if !isRetryableConcurrencyError(err) {
 			return err
 		}
+		recordRetryTelemetry(ctx, err)
 		if afterRetryable != nil {
 			afterRetryable()
 		}
@@ -350,7 +367,9 @@ func (s *DoltliteStore) resetPersistentDB() {
 }
 
 func (s *DoltliteStore) withExclusiveLock(ctx context.Context, fn func() error) error {
+	start := time.Now()
 	lock, err := WaitLock(ctx, s.dataDir)
+	recordLockWaitTelemetry(ctx, time.Since(start))
 	if err != nil {
 		return err
 	}

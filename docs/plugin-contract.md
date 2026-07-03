@@ -41,6 +41,37 @@ The prototype uses newline-delimited JSON over stdio. Each request has a
 method, optional ID, and params object. Each response echoes the ID and contains
 either `result` or `error`.
 
+## Beads Core Wiring
+
+Beads core can launch this process when `.beads/metadata.json` contains:
+
+```json
+{
+  "backend": "doltlite",
+  "backend_plugin_command": "/absolute/path/to/bd-backend-doltlite"
+}
+```
+
+The core adapter invokes the command with `serve` by default unless
+`backend_plugin_args` is provided. The plugin must write one hello response
+before processing requests:
+
+```json
+{
+  "ok": true,
+  "result": {
+    "protocol": "beads.backend.v1alpha1",
+    "backend": "doltlite",
+    "capabilities": {}
+  }
+}
+```
+
+The current adapter forwards the implemented issue/config/ready/label/commit
+methods. Full `storage.DoltStorage` coverage still needs protocol methods for
+dependencies, comments, events, slots, metadata, sync/remotes, annotations,
+history, and transaction handles.
+
 ## Transaction Shape
 
 The hardest method is transaction execution because Go callbacks do not cross a

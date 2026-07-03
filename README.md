@@ -33,9 +33,8 @@ The plugin should not wrap individual `bd` commands.
 ## Prototype Command
 
 ```bash
-DOLTLITE_LIB=/path/to/doltlite/build \
-CGO_LDFLAGS="-L${DOLTLITE_LIB} -Wl,-rpath,${DOLTLITE_LIB} -ldoltlite" \
-go run -tags "libsqlite3 gms_pure_go" ./cmd/bd-backend-doltlite capabilities
+./scripts/build.sh
+./bin/bd-backend-doltlite capabilities
 ```
 
 `serve` speaks newline-delimited JSON request/response messages over stdio. It
@@ -55,6 +54,29 @@ mkdir -p "$tmp/.beads"
 
 The example above is schematic because later requests need the `session_id`
 returned by `init`.
+
+## Core Adapter Smoke
+
+The Beads core branch `feat/backend-plugin-architecture` can launch this plugin
+through `.beads/metadata.json`:
+
+```json
+{
+  "backend": "doltlite",
+  "dolt_database": "beads",
+  "backend_plugin_command": "/absolute/path/to/bd-backend-doltlite"
+}
+```
+
+Run a temp-workspace smoke test with a `bd` binary built from that branch:
+
+```bash
+BD_BIN=/path/to/bd ./scripts/smoke-core-adapter.sh
+```
+
+The smoke initializes DoltLite through the plugin process, writes plugin config
+metadata, then runs `bd config`, `bd create`, `bd show`, `bd update`, and
+`bd ready` through Beads core's process adapter.
 
 ## Implemented Methods
 
@@ -94,9 +116,14 @@ It is not expected to support Dolt server remotes or server lifecycle commands.
 ## Current Limitations
 
 - Imports Beads internals through a temporary module path and local `replace`.
+- The module path intentionally remains under
+  `github.com/steveyegge/beads/plugins/backend/doltlite` until Beads exposes a
+  public backend SDK/protocol/types package. Moving this repo to a normal
+  external module path today would break Go's `internal/` import rules.
 - Does not yet expose dependencies, comments, leases, slots, migrations as
   separate protocol methods, or transaction handles.
-- Does not yet have a Beads-core client shim.
+- Requires Beads core from `feat/backend-plugin-architecture` for
+  `backend_plugin_command` client-adapter support.
 - Does not yet run the full Beads conformance suite through the process
   transport.
 

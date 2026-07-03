@@ -17,17 +17,43 @@
 - maintenance operations
 - optional versioning implementation
 
-## First Protocol Surface
+## Implemented Prototype Surface
 
 ```text
 capabilities
 doctor
 init
-open/session
-close/session
+open
+close
+set_config
+get_config
+create_issue
+get_issue
+search_issues
+update_issue
+add_label
+get_labels
+ready_work
+commit
 ```
 
-Storage methods can be added after the session model is settled. The hardest
-method is transaction execution because Go callbacks do not cross a process
-boundary. The process plugin should use transaction/session handles instead of
-callback-based APIs.
+The prototype uses newline-delimited JSON over stdio. Each request has a
+method, optional ID, and params object. Each response echoes the ID and contains
+either `result` or `error`.
+
+## Transaction Shape
+
+The hardest method is transaction execution because Go callbacks do not cross a
+process boundary. The process plugin should use transaction/session handles
+instead of callback-based APIs:
+
+```text
+begin_transaction -> tx_id
+tx_create_issue
+tx_add_label
+commit_transaction
+rollback_transaction
+```
+
+This keeps core command semantics in Beads while avoiding Go callback leakage
+across the plugin transport.

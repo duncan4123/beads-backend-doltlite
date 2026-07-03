@@ -43,16 +43,18 @@ either `result` or `error`.
 
 ## Beads Core Wiring
 
-Plugin authors should import the public protocol/types package:
+Beads core and the plugin communicate using the v1alpha1 protocol in
+`backend/plugin`. This repo keeps a local copy of those types so the plugin can
+remain self-contained while the upstream SDK boundary stabilizes:
 
 ```go
-import backendplugin "github.com/steveyegge/beads/backend/plugin"
+import backendplugin "github.com/duncan4123/beads-backend-doltlite/backend/plugin"
 ```
 
-The DoltLite prototype also imports the public DoltLite backend wrapper:
+The DoltLite storage implementation also lives in this repo:
 
 ```go
-import backenddoltlite "github.com/steveyegge/beads/backend/doltlite"
+import backenddoltlite "github.com/duncan4123/beads-backend-doltlite/internal/storage/doltlite"
 ```
 
 Beads core can launch this process when `.beads/metadata.json` contains:

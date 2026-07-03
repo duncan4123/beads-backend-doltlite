@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	backenddoltlite "github.com/steveyegge/beads/backend/doltlite"
-	backendplugin "github.com/steveyegge/beads/backend/plugin"
+	backendplugin "github.com/duncan4123/beads-backend-doltlite/backend/plugin"
+	backenddoltlite "github.com/duncan4123/beads-backend-doltlite/internal/storage/doltlite"
 )
 
 const Name = "doltlite"
@@ -57,7 +57,7 @@ type Session struct {
 	BeadsDir string
 	Database string
 	Branch   string
-	Store    *backenddoltlite.Store
+	Store    *backenddoltlite.DoltliteStore
 }
 
 var errTransactionRollback = errors.New("transaction rolled back")
@@ -512,13 +512,6 @@ func (s *Session) HeartbeatIssue(ctx context.Context, id, actor string) error {
 		actor = "bd-backend-doltlite"
 	}
 	return s.Store.HeartbeatIssue(ctx, id, actor)
-}
-
-func (s *Session) ReclaimExpiredLeases(ctx context.Context, olderThan time.Duration, actor string) ([]backendplugin.ReclaimedLease, error) {
-	if actor == "" {
-		actor = "bd-backend-doltlite"
-	}
-	return s.Store.ReclaimExpiredLeases(ctx, olderThan, actor)
 }
 
 func (s *Session) PromoteFromEphemeral(ctx context.Context, id, actor string) error {

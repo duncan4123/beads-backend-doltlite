@@ -1,0 +1,11 @@
+package issueops
+
+import "github.com/duncan4123/beads-backend-doltlite/internal/storage/dberrors"
+
+const queryBatchSize = 200
+
+// isTableNotExistError returns true if the error indicates a missing table
+// (MySQL/Dolt error 1146).
+func isTableNotExistError(err error) bool {
+	return dberrors.IsTableNotExist(err)
+}

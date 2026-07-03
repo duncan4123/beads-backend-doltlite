@@ -3,17 +3,18 @@
 Prototype external backend plugin for Beads using DoltLite as the storage
 engine.
 
-This repo is intentionally small. Its purpose is to make the plugin seam
-concrete while upstream Beads maintainers decide how backend plugins should
-work. The current prototype is functional: it opens the existing Beads
-DoltLite storage implementation behind a process protocol and supports a
-minimal issue workflow.
+This repo makes the plugin seam concrete while upstream Beads maintainers
+decide how backend plugins should work. The current prototype is functional: it
+owns the DoltLite storage implementation behind a process protocol and supports
+Beads issue/config/ready-work flows.
 
-The module path is normal external repo path. It imports the public Beads
-backend SDK packages added by `feat/backend-plugin-architecture`:
+The module path is a normal external repo path. The plugin keeps a local copy of
+the v1alpha1 protocol types and the DoltLite-backed storage implementation so it
+does not depend on fork-only Beads internals.
 
-- `github.com/steveyegge/beads/backend/plugin`
-- `github.com/steveyegge/beads/backend/doltlite`
+The matching Beads core PR is:
+
+- https://github.com/gastownhall/beads/pull/4561
 
 ## Proposed Integration
 

@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	backendplugin "github.com/steveyegge/beads/backend/plugin"
-
+	backendplugin "github.com/duncan4123/beads-backend-doltlite/backend/plugin"
 	"github.com/duncan4123/beads-backend-doltlite/internal/provider"
 )
 
@@ -711,20 +710,6 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 			return errorResponse(req.ID, "heartbeat_issue_failed", err)
 		}
 		return ok(req.ID, map[string]string{"id": p.ID})
-	case "reclaim_expired_leases":
-		var p backendplugin.ReclaimExpiredLeasesParams
-		if err := decode(req.Params, &p); err != nil {
-			return errorResponse(req.ID, "bad_params", err)
-		}
-		s, err := manager.Get(p.SessionID)
-		if err != nil {
-			return errorResponse(req.ID, "unknown_session", err)
-		}
-		leases, err := s.ReclaimExpiredLeases(ctx, time.Duration(p.OlderThanNanos), p.Actor)
-		if err != nil {
-			return errorResponse(req.ID, "reclaim_expired_leases_failed", err)
-		}
-		return ok(req.ID, leases)
 	case "promote_from_ephemeral":
 		var p backendplugin.ClaimIssueParams
 		if err := decode(req.Params, &p); err != nil {

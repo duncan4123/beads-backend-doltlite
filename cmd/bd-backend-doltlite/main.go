@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	backendplugin "github.com/steveyegge/beads/backend/plugin"
@@ -14,19 +17,25 @@ import (
 )
 
 func main() {
-	if len(os.Args) < 2 {
+	opts, args, err := parseOptions(os.Args[1:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		usage()
+		os.Exit(2)
+	}
+	if len(args) < 1 {
 		usage()
 		os.Exit(2)
 	}
 
 	var payload any
-	switch os.Args[1] {
+	switch args[0] {
 	case "capabilities":
 		payload = provider.BackendCapabilities()
 	case "doctor":
 		payload = provider.Doctor()
 	case "serve":
-		if err := serve(context.Background(), os.Stdin, os.Stdout); err != nil {
+		if err := serve(context.Background(), os.Stdin, os.Stdout, opts); err != nil {
 			fmt.Fprintf(os.Stderr, "serve: %v\n", err)
 			os.Exit(1)
 		}
@@ -45,12 +54,53 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: bd-backend-doltlite <capabilities|doctor|serve>")
+	fmt.Fprintln(os.Stderr, "usage: bd-backend-doltlite [--trace=<path>|--trace-stderr] <capabilities|doctor|serve>")
 }
 
-func serve(ctx context.Context, in *os.File, out *os.File) error {
+type options struct {
+	tracePath   string
+	traceStderr bool
+}
+
+func parseOptions(args []string) (options, []string, error) {
+	var opts options
+	for len(args) > 0 {
+		arg := args[0]
+		switch {
+		case arg == "--trace":
+			if len(args) < 2 {
+				return opts, args, fmt.Errorf("--trace requires a path")
+			}
+			opts.tracePath = args[1]
+			args = args[2:]
+		case strings.HasPrefix(arg, "--trace="):
+			opts.tracePath = strings.TrimPrefix(arg, "--trace=")
+			args = args[1:]
+		case arg == "--trace-stderr":
+			opts.traceStderr = true
+			args = args[1:]
+		case arg == "--no-trace":
+			opts.tracePath = ""
+			opts.traceStderr = false
+			args = args[1:]
+		case strings.HasPrefix(arg, "-"):
+			return opts, args, fmt.Errorf("unknown option %q", arg)
+		default:
+			return opts, args, nil
+		}
+	}
+	return opts, args, nil
+}
+
+func serve(ctx context.Context, in *os.File, out *os.File, opts options) error {
 	manager := provider.NewManager()
 	defer func() { _ = manager.CloseAll() }()
+
+	tracer, err := newTracer(opts)
+	if err != nil {
+		return err
+	}
+	defer tracer.Close()
 
 	enc := json.NewEncoder(out)
 	hello := backendplugin.Hello{
@@ -66,16 +116,103 @@ func serve(ctx context.Context, in *os.File, out *os.File) error {
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		var req backendplugin.Request
+		start := time.Now()
 		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
-			_ = enc.Encode(errorResponse("", "bad_request", err))
+			resp := errorResponse("", "bad_request", err)
+			tracer.Log(traceEntryFromResponse(start, req, resp))
+			_ = enc.Encode(resp)
 			continue
 		}
 		resp := handle(ctx, manager, req)
+		tracer.Log(traceEntryFromResponse(start, req, resp))
 		if err := enc.Encode(resp); err != nil {
 			return err
 		}
 	}
 	return scanner.Err()
+}
+
+type tracer struct {
+	out io.WriteCloser
+	enc *json.Encoder
+}
+
+type traceEntry struct {
+	Timestamp  string `json:"ts"`
+	PID        int    `json:"pid"`
+	Backend    string `json:"backend"`
+	RequestID  string `json:"request_id,omitempty"`
+	Method     string `json:"method,omitempty"`
+	OK         bool   `json:"ok"`
+	ErrorCode  string `json:"error_code,omitempty"`
+	DurationMS int64  `json:"duration_ms"`
+}
+
+func newTracer(opts options) (*tracer, error) {
+	if env := os.Getenv("BEADS_BACKEND_DOLTLITE_TRACE"); env != "" {
+		switch strings.ToLower(env) {
+		case "0", "false", "off", "none":
+			opts.tracePath = ""
+			opts.traceStderr = false
+		case "stderr":
+			opts.tracePath = ""
+			opts.traceStderr = true
+		default:
+			opts.tracePath = env
+			opts.traceStderr = false
+		}
+	}
+	if opts.traceStderr {
+		return &tracer{out: nopWriteCloser{os.Stderr}, enc: json.NewEncoder(os.Stderr)}, nil
+	}
+	if opts.tracePath == "" {
+		return &tracer{}, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(opts.tracePath), 0o755); err != nil {
+		return nil, fmt.Errorf("create trace dir: %w", err)
+	}
+	f, err := os.OpenFile(opts.tracePath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("open trace file: %w", err)
+	}
+	return &tracer{out: f, enc: json.NewEncoder(f)}, nil
+}
+
+func (t *tracer) Log(entry traceEntry) {
+	if t == nil || t.enc == nil {
+		return
+	}
+	_ = t.enc.Encode(entry)
+}
+
+func (t *tracer) Close() {
+	if t == nil || t.out == nil {
+		return
+	}
+	_ = t.out.Close()
+}
+
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (nopWriteCloser) Close() error { return nil }
+
+func traceEntryFromResponse(start time.Time, req backendplugin.Request, resp backendplugin.Response) traceEntry {
+	var code string
+	if resp.Error != nil {
+		code = resp.Error.Code
+	}
+	return traceEntry{
+		Timestamp:  time.Now().UTC().Format(time.RFC3339Nano),
+		PID:        os.Getpid(),
+		Backend:    provider.Name,
+		RequestID:  req.ID,
+		Method:     req.Method,
+		OK:         resp.OK,
+		ErrorCode:  code,
+		DurationMS: time.Since(start).Milliseconds(),
+	}
 }
 
 func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Request) backendplugin.Response {
@@ -113,6 +250,34 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 			return errorResponse(req.ID, "close_failed", err)
 		}
 		return ok(req.ID, map[string]bool{"closed": true})
+	case "begin_transaction":
+		var p backendplugin.TransactionParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		txID, err := manager.BeginTransaction(ctx, p.SessionID, p.CommitMsg)
+		if err != nil {
+			return errorResponse(req.ID, "begin_transaction_failed", err)
+		}
+		return ok(req.ID, map[string]string{"tx_id": txID})
+	case "commit_transaction":
+		var p backendplugin.TransactionParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		if err := manager.CommitTransaction(ctx, p.TxID); err != nil {
+			return errorResponse(req.ID, "commit_transaction_failed", err)
+		}
+		return ok(req.ID, map[string]bool{"committed": true})
+	case "rollback_transaction":
+		var p backendplugin.TransactionParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		if err := manager.RollbackTransaction(ctx, p.TxID); err != nil {
+			return errorResponse(req.ID, "rollback_transaction_failed", err)
+		}
+		return ok(req.ID, map[string]bool{"rolled_back": true})
 	case "path":
 		var p backendplugin.SessionParams
 		if err := decode(req.Params, &p); err != nil {
@@ -329,7 +494,7 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 		if err := s.CreateIssues(ctx, p.Issues, p.Actor); err != nil {
 			return errorResponse(req.ID, "create_issues_failed", err)
 		}
-		return ok(req.ID, map[string]int{"count": len(p.Issues)})
+		return ok(req.ID, p.Issues)
 	case "create_issues_with_full_options":
 		var p backendplugin.CreateIssuesParams
 		if err := decode(req.Params, &p); err != nil {
@@ -342,7 +507,7 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 		if err := s.CreateIssuesWithFullOptions(ctx, p.Issues, p.Actor, p.Options); err != nil {
 			return errorResponse(req.ID, "create_issues_with_full_options_failed", err)
 		}
-		return ok(req.ID, map[string]int{"count": len(p.Issues)})
+		return ok(req.ID, p.Issues)
 	case "get_issue":
 		var p backendplugin.IssueIDParams
 		if err := decode(req.Params, &p); err != nil {
@@ -2036,6 +2201,318 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 			return errorResponse(req.ID, "commit_failed", err)
 		}
 		return ok(req.ID, map[string]bool{"committed": true})
+	case "tx_create_issue":
+		var p backendplugin.CreateIssueParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.CreateIssue(ctx, p.Issue, p.Actor); err != nil {
+			return errorResponse(req.ID, "tx_create_issue_failed", err)
+		}
+		return ok(req.ID, p.Issue)
+	case "tx_create_issues":
+		var p backendplugin.CreateIssuesParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.CreateIssues(ctx, p.Issues, p.Actor); err != nil {
+			return errorResponse(req.ID, "tx_create_issues_failed", err)
+		}
+		return ok(req.ID, p.Issues)
+	case "tx_update_issue":
+		var p backendplugin.UpdateIssueParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := provider.NormalizeUpdatePayload(p.Updates); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		if err := tx.UpdateIssue(ctx, p.ID, p.Updates, p.Actor); err != nil {
+			return errorResponse(req.ID, "tx_update_issue_failed", err)
+		}
+		return ok(req.ID, map[string]string{"id": p.ID})
+	case "tx_close_issue":
+		var p backendplugin.CloseIssueParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.CloseIssue(ctx, p.ID, p.Reason, p.Actor, p.Session); err != nil {
+			return errorResponse(req.ID, "tx_close_issue_failed", err)
+		}
+		return ok(req.ID, map[string]string{"id": p.ID})
+	case "tx_delete_issue":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.DeleteIssue(ctx, p.ID); err != nil {
+			return errorResponse(req.ID, "tx_delete_issue_failed", err)
+		}
+		return ok(req.ID, map[string]string{"id": p.ID})
+	case "tx_get_issue":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		issue, err := tx.GetIssue(ctx, p.ID)
+		if err != nil {
+			return errorResponse(req.ID, "tx_get_issue_failed", err)
+		}
+		return ok(req.ID, issue)
+	case "tx_search_issues":
+		var p backendplugin.SearchIssuesParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		issues, err := tx.SearchIssues(ctx, p.Query, p.Filter)
+		if err != nil {
+			return errorResponse(req.ID, "tx_search_issues_failed", err)
+		}
+		return ok(req.ID, issues)
+	case "tx_add_dependency":
+		var p backendplugin.DependencyParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.AddDependencyWithOptions(ctx, p.Dependency, p.Actor, p.Options); err != nil {
+			return errorResponse(req.ID, "tx_add_dependency_failed", err)
+		}
+		return ok(req.ID, map[string]bool{"added": true})
+	case "tx_remove_dependency":
+		var p backendplugin.DependencyParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.RemoveDependency(ctx, p.IssueID, p.DependsOnID, p.Actor); err != nil {
+			return errorResponse(req.ID, "tx_remove_dependency_failed", err)
+		}
+		return ok(req.ID, map[string]bool{"removed": true})
+	case "tx_get_dependency_records":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		deps, err := tx.GetDependencyRecords(ctx, p.ID)
+		if err != nil {
+			return errorResponse(req.ID, "tx_get_dependency_records_failed", err)
+		}
+		return ok(req.ID, deps)
+	case "tx_cycle_through_edges":
+		var p backendplugin.CycleEdgesParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		cycle, err := tx.CycleThroughEdges(ctx, p.Edges)
+		if err != nil {
+			return errorResponse(req.ID, "tx_cycle_through_edges_failed", err)
+		}
+		return ok(req.ID, map[string]string{"cycle": cycle})
+	case "tx_add_label":
+		var p backendplugin.AddLabelParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.AddLabel(ctx, p.ID, p.Label, p.Actor); err != nil {
+			return errorResponse(req.ID, "tx_add_label_failed", err)
+		}
+		return ok(req.ID, map[string]string{"id": p.ID, "label": p.Label})
+	case "tx_remove_label":
+		var p backendplugin.LabelParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.RemoveLabel(ctx, p.ID, p.Label, p.Actor); err != nil {
+			return errorResponse(req.ID, "tx_remove_label_failed", err)
+		}
+		return ok(req.ID, map[string]string{"id": p.ID, "label": p.Label})
+	case "tx_get_labels":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		labels, err := tx.GetLabels(ctx, p.ID)
+		if err != nil {
+			return errorResponse(req.ID, "tx_get_labels_failed", err)
+		}
+		return ok(req.ID, labels)
+	case "tx_set_config":
+		var p backendplugin.ConfigParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.SetConfig(ctx, p.Key, p.Value); err != nil {
+			return errorResponse(req.ID, "tx_set_config_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key})
+	case "tx_get_config":
+		var p backendplugin.ConfigParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		value, err := tx.GetConfig(ctx, p.Key)
+		if err != nil {
+			return errorResponse(req.ID, "tx_get_config_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key, "value": value})
+	case "tx_set_metadata":
+		var p backendplugin.MetadataParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.SetMetadata(ctx, p.Key, p.Value); err != nil {
+			return errorResponse(req.ID, "tx_set_metadata_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key})
+	case "tx_get_metadata":
+		var p backendplugin.MetadataParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		value, err := tx.GetMetadata(ctx, p.Key)
+		if err != nil {
+			return errorResponse(req.ID, "tx_get_metadata_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key, "value": value})
+	case "tx_set_local_metadata":
+		var p backendplugin.MetadataParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.SetLocalMetadata(ctx, p.Key, p.Value); err != nil {
+			return errorResponse(req.ID, "tx_set_local_metadata_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key})
+	case "tx_get_local_metadata":
+		var p backendplugin.MetadataParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		value, err := tx.GetLocalMetadata(ctx, p.Key)
+		if err != nil {
+			return errorResponse(req.ID, "tx_get_local_metadata_failed", err)
+		}
+		return ok(req.ID, map[string]string{"key": p.Key, "value": value})
+	case "tx_add_comment":
+		var p backendplugin.CommentParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		if err := tx.AddComment(ctx, p.IssueID, p.Author, p.Text); err != nil {
+			return errorResponse(req.ID, "tx_add_comment_failed", err)
+		}
+		return ok(req.ID, map[string]string{"id": p.IssueID})
+	case "tx_import_issue_comment":
+		var p backendplugin.CommentParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		comment, err := tx.ImportIssueComment(ctx, p.IssueID, p.Author, p.Text, p.CreatedAt)
+		if err != nil {
+			return errorResponse(req.ID, "tx_import_issue_comment_failed", err)
+		}
+		return ok(req.ID, comment)
+	case "tx_get_issue_comments":
+		var p backendplugin.IssueIDParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		tx, err := manager.GetTransaction(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_transaction", err)
+		}
+		comments, err := tx.GetIssueComments(ctx, p.ID)
+		if err != nil {
+			return errorResponse(req.ID, "tx_get_issue_comments_failed", err)
+		}
+		return ok(req.ID, comments)
 	default:
 		return errorResponse(req.ID, "unknown_method", fmt.Errorf("%s", req.Method))
 	}

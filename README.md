@@ -41,6 +41,16 @@ The plugin should not wrap individual `bd` commands.
 `serve` speaks newline-delimited JSON request/response messages over stdio. It
 prints an initial protocol hello response, then handles requests.
 
+Request tracing can be enabled without logging request params:
+
+```bash
+./bin/bd-backend-doltlite --trace=/tmp/bd-backend-doltlite.jsonl serve
+```
+
+Each trace line is JSONL with timestamp, pid, backend, request ID, method,
+success/error code, and duration. Use `--trace-stderr` for stderr tracing, or
+set `BEADS_BACKEND_DOLTLITE_TRACE` to a file path, `stderr`, or `off`.
+
 Example:
 
 ```bash

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -46,8 +47,9 @@ func Doctor() []Diagnostic {
 }
 
 type Manager struct {
-	mu       sync.Mutex
-	sessions map[string]*Session
+	mu           sync.Mutex
+	sessions     map[string]*Session
+	transactions map[string]*activeTransaction
 }
 
 type Session struct {
@@ -58,8 +60,27 @@ type Session struct {
 	Store    *backenddoltlite.Store
 }
 
+var errTransactionRollback = errors.New("transaction rolled back")
+
+type activeTransaction struct {
+	ID       string
+	Session  *Session
+	ready    chan struct{}
+	done     chan transactionDecision
+	finished chan error
+	tx       backendplugin.Transaction
+}
+
+type transactionDecision struct {
+	rollback bool
+	err      error
+}
+
 func NewManager() *Manager {
-	return &Manager{sessions: make(map[string]*Session)}
+	return &Manager{
+		sessions:     make(map[string]*Session),
+		transactions: make(map[string]*activeTransaction),
+	}
 }
 
 func (m *Manager) Init(ctx context.Context, beadsDir, database, branch, prefix, actor string) (*Session, error) {
@@ -141,6 +162,11 @@ func (m *Manager) Close(id string) error {
 
 func (m *Manager) CloseAll() error {
 	m.mu.Lock()
+	transactions := make([]*activeTransaction, 0, len(m.transactions))
+	for id, tx := range m.transactions {
+		delete(m.transactions, id)
+		transactions = append(transactions, tx)
+	}
 	sessions := make([]*Session, 0, len(m.sessions))
 	for id, s := range m.sessions {
 		delete(m.sessions, id)
@@ -148,12 +174,128 @@ func (m *Manager) CloseAll() error {
 	}
 	m.mu.Unlock()
 	var err error
+	for _, tx := range transactions {
+		if closeErr := tx.finish(context.Background(), transactionDecision{rollback: true}); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}
 	for _, s := range sessions {
 		if closeErr := s.Store.Close(); closeErr != nil {
 			err = errors.Join(err, closeErr)
 		}
 	}
 	return err
+}
+
+func (m *Manager) BeginTransaction(ctx context.Context, sessionID, commitMsg string) (string, error) {
+	s, err := m.Get(sessionID)
+	if err != nil {
+		return "", err
+	}
+	txID := newSessionID()
+	tx := &activeTransaction{
+		ID:       txID,
+		Session:  s,
+		ready:    make(chan struct{}),
+		done:     make(chan transactionDecision, 1),
+		finished: make(chan error, 1),
+	}
+
+	m.mu.Lock()
+	m.transactions[txID] = tx
+	m.mu.Unlock()
+
+	go func() {
+		err := s.Store.RunInTransaction(context.Background(), commitMsg, func(storeTx backendplugin.Transaction) error {
+			tx.tx = storeTx
+			close(tx.ready)
+			decision := <-tx.done
+			if decision.rollback {
+				return errTransactionRollback
+			}
+			return decision.err
+		})
+		if errors.Is(err, errTransactionRollback) {
+			err = nil
+		}
+		m.mu.Lock()
+		delete(m.transactions, txID)
+		m.mu.Unlock()
+		tx.finished <- err
+	}()
+
+	select {
+	case <-tx.ready:
+		return txID, nil
+	case err := <-tx.finished:
+		if err != nil {
+			return "", err
+		}
+		return "", errors.New("transaction ended before it became ready")
+	case <-ctx.Done():
+		_ = tx.finish(context.Background(), transactionDecision{rollback: true})
+		return "", ctx.Err()
+	}
+}
+
+func (m *Manager) GetTransaction(id string) (backendplugin.Transaction, error) {
+	m.mu.Lock()
+	tx, ok := m.transactions[id]
+	m.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("unknown transaction: %s", id)
+	}
+	select {
+	case <-tx.ready:
+		if tx.tx == nil {
+			return nil, fmt.Errorf("transaction not ready: %s", id)
+		}
+		return tx.tx, nil
+	default:
+		return nil, fmt.Errorf("transaction not ready: %s", id)
+	}
+}
+
+func (m *Manager) CommitTransaction(ctx context.Context, id string) error {
+	tx, err := m.getActiveTransaction(id)
+	if err != nil {
+		return err
+	}
+	return tx.finish(ctx, transactionDecision{})
+}
+
+func (m *Manager) RollbackTransaction(ctx context.Context, id string) error {
+	tx, err := m.getActiveTransaction(id)
+	if err != nil {
+		return err
+	}
+	return tx.finish(ctx, transactionDecision{rollback: true})
+}
+
+func (m *Manager) getActiveTransaction(id string) (*activeTransaction, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	tx, ok := m.transactions[id]
+	if !ok {
+		return nil, fmt.Errorf("unknown transaction: %s", id)
+	}
+	return tx, nil
+}
+
+func (tx *activeTransaction) finish(ctx context.Context, decision transactionDecision) error {
+	select {
+	case tx.done <- decision:
+	case err := <-tx.finished:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-tx.finished:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Session) SetConfig(ctx context.Context, key, value string) error {
@@ -251,7 +393,7 @@ func (s *Session) CreateIssuesWithFullOptions(ctx context.Context, issues []*bac
 			withDefaults(issue)
 		}
 	}
-	return s.Store.CreateIssuesWithFullOptions(ctx, issues, actor, opts)
+	return s.Store.CreateIssuesWithFullOptions(ctx, issues, actor, opts.Storage())
 }
 
 func (s *Session) GetIssue(ctx context.Context, id string) (*backendplugin.Issue, error) {
@@ -274,6 +416,9 @@ func (s *Session) UpdateIssue(ctx context.Context, id string, updates map[string
 	if actor == "" {
 		actor = "bd-backend-doltlite"
 	}
+	if err := NormalizeUpdatePayload(updates); err != nil {
+		return nil, err
+	}
 	if err := s.Store.UpdateIssue(ctx, id, updates, actor); err != nil {
 		return nil, err
 	}
@@ -286,6 +431,26 @@ func (s *Session) UpdateIssue(ctx context.Context, id string, updates map[string
 		}
 	}
 	return s.Store.GetIssue(ctx, id)
+}
+
+func NormalizeUpdatePayload(updates map[string]interface{}) error {
+	if updates == nil {
+		return nil
+	}
+	rawMetadata, ok := updates["metadata"]
+	if !ok {
+		return nil
+	}
+	switch rawMetadata.(type) {
+	case string, []byte, json.RawMessage:
+		return nil
+	}
+	data, err := json.Marshal(rawMetadata)
+	if err != nil {
+		return fmt.Errorf("marshal metadata update: %w", err)
+	}
+	updates["metadata"] = json.RawMessage(data)
+	return nil
 }
 
 func (s *Session) ReopenIssue(ctx context.Context, id, reason, actor string) error {

@@ -43,6 +43,18 @@ either `result` or `error`.
 
 ## Beads Core Wiring
 
+Plugin authors should import the public protocol/types package:
+
+```go
+import backendplugin "github.com/steveyegge/beads/backend/plugin"
+```
+
+The DoltLite prototype also imports the public DoltLite backend wrapper:
+
+```go
+import backenddoltlite "github.com/steveyegge/beads/backend/doltlite"
+```
+
 Beads core can launch this process when `.beads/metadata.json` contains:
 
 ```json

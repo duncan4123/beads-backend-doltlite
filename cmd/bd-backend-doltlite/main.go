@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/steveyegge/beads/internal/types"
-	"github.com/steveyegge/beads/plugins/backend/doltlite/internal/protocol"
-	"github.com/steveyegge/beads/plugins/backend/doltlite/internal/provider"
+	backendplugin "github.com/steveyegge/beads/backend/plugin"
+
+	"github.com/duncan4123/beads-backend-doltlite/internal/provider"
 )
 
 func main() {
@@ -52,19 +52,19 @@ func serve(ctx context.Context, in *os.File, out *os.File) error {
 	defer func() { _ = manager.CloseAll() }()
 
 	enc := json.NewEncoder(out)
-	hello := protocol.Hello{
-		Protocol:     protocol.Version,
+	hello := backendplugin.Hello{
+		Protocol:     backendplugin.ProtocolVersion,
 		Backend:      provider.Name,
 		Capabilities: provider.BackendCapabilities(),
 	}
-	if err := enc.Encode(protocol.Response{OK: true, Result: mustJSON(hello)}); err != nil {
+	if err := enc.Encode(backendplugin.Response{OK: true, Result: mustJSON(hello)}); err != nil {
 		return err
 	}
 
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
-		var req protocol.Request
+		var req backendplugin.Request
 		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
 			_ = enc.Encode(errorResponse("", "bad_request", err))
 			continue
@@ -77,14 +77,14 @@ func serve(ctx context.Context, in *os.File, out *os.File) error {
 	return scanner.Err()
 }
 
-func handle(ctx context.Context, manager *provider.Manager, req protocol.Request) protocol.Response {
+func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Request) backendplugin.Response {
 	switch req.Method {
 	case "capabilities":
 		return ok(req.ID, provider.BackendCapabilities())
 	case "doctor":
 		return ok(req.ID, provider.Doctor())
 	case "init":
-		var p protocol.InitParams
+		var p backendplugin.InitParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -92,9 +92,9 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		if err != nil {
 			return errorResponse(req.ID, "init_failed", err)
 		}
-		return ok(req.ID, protocol.OpenResult{SessionID: s.ID})
+		return ok(req.ID, backendplugin.OpenResult{SessionID: s.ID})
 	case "open":
-		var p protocol.OpenParams
+		var p backendplugin.OpenParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -102,9 +102,9 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		if err != nil {
 			return errorResponse(req.ID, "open_failed", err)
 		}
-		return ok(req.ID, protocol.OpenResult{SessionID: s.ID})
+		return ok(req.ID, backendplugin.OpenResult{SessionID: s.ID})
 	case "close":
-		var p protocol.SessionParams
+		var p backendplugin.SessionParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -113,7 +113,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, map[string]bool{"closed": true})
 	case "set_config":
-		var p protocol.ConfigParams
+		var p backendplugin.ConfigParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -126,7 +126,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, map[string]string{"key": p.Key})
 	case "get_config":
-		var p protocol.ConfigParams
+		var p backendplugin.ConfigParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -140,7 +140,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, map[string]string{"key": p.Key, "value": value})
 	case "create_issue":
-		var p protocol.CreateIssueParams
+		var p backendplugin.CreateIssueParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -154,7 +154,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, issue)
 	case "get_issue":
-		var p protocol.IssueIDParams
+		var p backendplugin.IssueIDParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -168,7 +168,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, issue)
 	case "search_issues":
-		var p protocol.SearchIssuesParams
+		var p backendplugin.SearchIssuesParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -182,7 +182,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, issues)
 	case "update_issue":
-		var p protocol.UpdateIssueParams
+		var p backendplugin.UpdateIssueParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -196,7 +196,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, issue)
 	case "add_label":
-		var p protocol.AddLabelParams
+		var p backendplugin.AddLabelParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -210,7 +210,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, labels)
 	case "get_labels":
-		var p protocol.IssueIDParams
+		var p backendplugin.IssueIDParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -225,8 +225,8 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		return ok(req.ID, labels)
 	case "ready_work":
 		var p struct {
-			SessionID string           `json:"session_id"`
-			Filter    types.WorkFilter `json:"filter,omitempty"`
+			SessionID string                   `json:"session_id"`
+			Filter    backendplugin.WorkFilter `json:"filter,omitempty"`
 		}
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
@@ -241,7 +241,7 @@ func handle(ctx context.Context, manager *provider.Manager, req protocol.Request
 		}
 		return ok(req.ID, issues)
 	case "commit":
-		var p protocol.CommitParams
+		var p backendplugin.CommitParams
 		if err := decode(req.Params, &p); err != nil {
 			return errorResponse(req.ID, "bad_params", err)
 		}
@@ -265,15 +265,15 @@ func decode(raw json.RawMessage, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
-func ok(id string, payload any) protocol.Response {
-	return protocol.Response{ID: id, OK: true, Result: mustJSON(payload)}
+func ok(id string, payload any) backendplugin.Response {
+	return backendplugin.Response{ID: id, OK: true, Result: mustJSON(payload)}
 }
 
-func errorResponse(id, code string, err error) protocol.Response {
-	return protocol.Response{
+func errorResponse(id, code string, err error) backendplugin.Response {
+	return backendplugin.Response{
 		ID: id,
 		OK: false,
-		Error: &protocol.Error{
+		Error: &backendplugin.Error{
 			Code:    code,
 			Message: err.Error(),
 		},

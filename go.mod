@@ -1,4 +1,4 @@
-module github.com/steveyegge/beads/plugins/backend/doltlite
+module github.com/duncan4123/beads-backend-doltlite
 
 go 1.26.2
 
@@ -33,4 +33,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/steveyegge/beads => ../../beads-doltlite
+replace github.com/steveyegge/beads => ../../workspaces/beads-plugin-architecture

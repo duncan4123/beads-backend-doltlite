@@ -9,10 +9,11 @@ work. The current prototype is functional: it opens the existing Beads
 DoltLite storage implementation behind a process protocol and supports a
 minimal issue workflow.
 
-The module path is temporarily under `github.com/steveyegge/beads/...` so this
-prototype can import the current Beads `internal/storage/doltlite` package.
-That dependency is the exact pressure point a future public backend SDK should
-remove.
+The module path is normal external repo path. It imports the public Beads
+backend SDK packages added by `feat/backend-plugin-architecture`:
+
+- `github.com/steveyegge/beads/backend/plugin`
+- `github.com/steveyegge/beads/backend/doltlite`
 
 ## Proposed Integration
 
@@ -115,11 +116,8 @@ It is not expected to support Dolt server remotes or server lifecycle commands.
 
 ## Current Limitations
 
-- Imports Beads internals through a temporary module path and local `replace`.
-- The module path intentionally remains under
-  `github.com/steveyegge/beads/plugins/backend/doltlite` until Beads exposes a
-  public backend SDK/protocol/types package. Moving this repo to a normal
-  external module path today would break Go's `internal/` import rules.
+- Uses a local `replace` to the Beads `feat/backend-plugin-architecture`
+  workspace until the public backend SDK packages land upstream.
 - Does not yet expose dependencies, comments, leases, slots, migrations as
   separate protocol methods, or transaction handles.
 - Requires Beads core from `feat/backend-plugin-architecture` for

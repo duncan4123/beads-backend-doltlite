@@ -10,30 +10,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/steveyegge/beads/internal/storage"
-	"github.com/steveyegge/beads/internal/storage/doltlite"
-	"github.com/steveyegge/beads/internal/types"
+	backenddoltlite "github.com/steveyegge/beads/backend/doltlite"
+	backendplugin "github.com/steveyegge/beads/backend/plugin"
 )
 
 const Name = "doltlite"
 
-type Capabilities struct {
-	Embedded          bool `json:"embedded"`
-	Transactions      bool `json:"transactions"`
-	RawSQL            bool `json:"raw_sql"`
-	Leases            bool `json:"leases"`
-	Maintenance       bool `json:"maintenance"`
-	Versioning        bool `json:"versioning"`
-	Branching         bool `json:"branching"`
-	DoltRemotes       bool `json:"dolt_remotes"`
-	ConcurrentWriters bool `json:"concurrent_writers"`
-}
+type Capabilities = backendplugin.Capabilities
 
-type Diagnostic struct {
-	Level   string `json:"level"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
+type Diagnostic = backendplugin.Diagnostic
 
 func BackendCapabilities() Capabilities {
 	return Capabilities{
@@ -69,7 +54,7 @@ type Session struct {
 	BeadsDir string
 	Database string
 	Branch   string
-	Store    *doltlite.DoltliteStore
+	Store    *backenddoltlite.Store
 }
 
 func NewManager() *Manager {
@@ -112,7 +97,7 @@ func (m *Manager) Open(ctx context.Context, beadsDir, database, branch string) (
 	if err != nil {
 		return nil, err
 	}
-	store, err := doltlite.New(ctx, absBeadsDir, database, branch)
+	store, err := backenddoltlite.New(ctx, absBeadsDir, database, branch)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +163,7 @@ func (s *Session) GetConfig(ctx context.Context, key string) (string, error) {
 	return s.Store.GetConfig(ctx, key)
 }
 
-func (s *Session) CreateIssue(ctx context.Context, issue *types.Issue, actor string, commit bool, message string) (*types.Issue, error) {
+func (s *Session) CreateIssue(ctx context.Context, issue *backendplugin.Issue, actor string, commit bool, message string) (*backendplugin.Issue, error) {
 	if issue == nil {
 		return nil, errors.New("issue is required")
 	}
@@ -200,15 +185,15 @@ func (s *Session) CreateIssue(ctx context.Context, issue *types.Issue, actor str
 	return s.Store.GetIssue(ctx, issue.ID)
 }
 
-func (s *Session) GetIssue(ctx context.Context, id string) (*types.Issue, error) {
+func (s *Session) GetIssue(ctx context.Context, id string) (*backendplugin.Issue, error) {
 	return s.Store.GetIssue(ctx, id)
 }
 
-func (s *Session) SearchIssues(ctx context.Context, query string, filter types.IssueFilter) ([]*types.Issue, error) {
+func (s *Session) SearchIssues(ctx context.Context, query string, filter backendplugin.IssueFilter) ([]*backendplugin.Issue, error) {
 	return s.Store.SearchIssues(ctx, query, filter)
 }
 
-func (s *Session) UpdateIssue(ctx context.Context, id string, updates map[string]interface{}, actor string, commit bool, message string) (*types.Issue, error) {
+func (s *Session) UpdateIssue(ctx context.Context, id string, updates map[string]interface{}, actor string, commit bool, message string) (*backendplugin.Issue, error) {
 	if actor == "" {
 		actor = "bd-backend-doltlite"
 	}
@@ -248,7 +233,7 @@ func (s *Session) GetLabels(ctx context.Context, id string) ([]string, error) {
 	return s.Store.GetLabels(ctx, id)
 }
 
-func (s *Session) ReadyWork(ctx context.Context, filter types.WorkFilter) ([]*types.Issue, error) {
+func (s *Session) ReadyWork(ctx context.Context, filter backendplugin.WorkFilter) ([]*backendplugin.Issue, error) {
 	return s.Store.GetReadyWork(ctx, filter)
 }
 
@@ -256,14 +241,12 @@ func (s *Session) Commit(ctx context.Context, message string) error {
 	return s.Store.Commit(ctx, message)
 }
 
-var _ storage.DoltStorage = (*doltlite.DoltliteStore)(nil)
-
-func withDefaults(issue *types.Issue) {
+func withDefaults(issue *backendplugin.Issue) {
 	if issue.Status == "" {
-		issue.Status = types.StatusOpen
+		issue.Status = backendplugin.StatusOpen
 	}
 	if issue.IssueType == "" {
-		issue.IssueType = types.TypeTask
+		issue.IssueType = backendplugin.TypeTask
 	}
 }
 

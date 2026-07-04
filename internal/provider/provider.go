@@ -30,8 +30,8 @@ func BackendCapabilities() Capabilities {
 		Leases:            true,
 		Maintenance:       true,
 		Versioning:        true,
-		Branching:         false,
-		DoltRemotes:       false,
+		Branching:         true,
+		DoltRemotes:       true,
 		ConcurrentWriters: true,
 	}
 }

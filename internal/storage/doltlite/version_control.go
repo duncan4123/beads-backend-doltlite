@@ -7,6 +7,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/duncan4123/beads-backend-doltlite/internal/storage"
@@ -445,7 +447,7 @@ func (s *DoltliteStore) PullRemote(ctx context.Context, remote string) error {
 
 func (s *DoltliteStore) Fetch(ctx context.Context, peer string) error {
 	return s.withDBConn(ctx, func(db versioncontrolops.DBConn) error {
-		_, err := db.ExecContext(ctx, "SELECT dolt_fetch(?)", peer)
+		_, err := db.ExecContext(ctx, "SELECT dolt_fetch(?, ?)", peer, s.branch)
 		return err
 	})
 }
@@ -481,24 +483,75 @@ func (s *DoltliteStore) PullFrom(ctx context.Context, peer string) ([]storage.Co
 // Backup operations
 // ---------------------------------------------------------------------------
 
-var errDoltliteBackupUnsupported = errors.New("doltlite backup operations unsupported")
+const doltliteBackupRemote = "backup_export"
 
 func (s *DoltliteStore) BackupAdd(ctx context.Context, name, url string) error {
-	return errDoltliteBackupUnsupported
+	return s.AddRemote(ctx, name, url)
 }
 
 func (s *DoltliteStore) BackupSync(ctx context.Context, name string) error {
-	return errDoltliteBackupUnsupported
+	return s.PushRemote(ctx, name, true)
 }
 
 func (s *DoltliteStore) BackupRemove(ctx context.Context, name string) error {
-	return errDoltliteBackupUnsupported
+	return s.RemoveRemote(ctx, name)
 }
 
 func (s *DoltliteStore) BackupDatabase(ctx context.Context, dir string) error {
-	return errDoltliteBackupUnsupported
+	backupURL, err := s.backupDirRemoteURL(dir, "backup destination")
+	if err != nil {
+		return err
+	}
+
+	_ = s.BackupRemove(ctx, doltliteBackupRemote)
+	if err := s.BackupAdd(ctx, doltliteBackupRemote, backupURL); err != nil {
+		return fmt.Errorf("register backup remote: %w", err)
+	}
+	if err := s.BackupSync(ctx, doltliteBackupRemote); err != nil {
+		return fmt.Errorf("sync to backup: %w", err)
+	}
+	return nil
 }
 
 func (s *DoltliteStore) RestoreDatabase(ctx context.Context, dir string, force bool) error {
-	return errDoltliteBackupUnsupported
+	backupURL, err := s.backupDirRemoteURL(dir, "backup source")
+	if err != nil {
+		return err
+	}
+
+	restoreRemote := "backup_restore"
+	_ = s.RemoveRemote(ctx, restoreRemote)
+	if err := s.AddRemote(ctx, restoreRemote, backupURL); err != nil {
+		return fmt.Errorf("register restore remote: %w", err)
+	}
+	if err := s.Fetch(ctx, restoreRemote); err != nil {
+		return fmt.Errorf("fetch backup: %w", err)
+	}
+	if force {
+		return s.withDBWrite(ctx, func(db versioncontrolops.DBConn) error {
+			if _, err := db.ExecContext(ctx, "SELECT dolt_reset('--hard', ?)", restoreRemote+"/"+s.branch); err != nil {
+				return fmt.Errorf("reset to backup: %w", err)
+			}
+			return nil
+		})
+	}
+	if err := s.PullRemote(ctx, restoreRemote); err != nil {
+		return fmt.Errorf("pull backup: %w", err)
+	}
+	return nil
+}
+
+func (s *DoltliteStore) backupDirRemoteURL(dir, role string) (string, error) {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return "", fmt.Errorf("%s does not exist: %w", role, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("%s is not a directory: %s", role, dir)
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve backup directory: %w", err)
+	}
+	return "file://" + filepath.ToSlash(filepath.Join(abs, s.database+".db")), nil
 }

@@ -32,8 +32,8 @@ func readyWorkPageSize(limit int) int {
 	return limit
 }
 
-func buildReadyWorkOrder(policy types.SortPolicy) sqlbuild.ReadyWorkOrder {
-	return sqlbuild.BuildReadyWorkOrder(policy, "created_at", "priority")
+func buildReadyWorkOrder(policy types.SortPolicy, dialect sqlbuild.CountsDialect) sqlbuild.ReadyWorkOrder {
+	return sqlbuild.BuildReadyWorkOrderDialect(policy, "created_at", "priority", dialect)
 }
 
 // buildReadyWorkPredicates computes the ID sets the ready-work WHERE clause
@@ -69,7 +69,7 @@ func buildReadyWorkPredicatesDialect(ctx context.Context, tx DBTX, filter types.
 		return nil, err
 	}
 
-	orderBy := buildReadyWorkOrder(filter.SortPolicy)
+	orderBy := buildReadyWorkOrder(filter.SortPolicy, dialect)
 	args = append(args, orderBy.Args...)
 
 	var limitSQL string
@@ -198,7 +198,7 @@ func getReadyWispsInTx(ctx context.Context, tx DBTX, filter types.WorkFilter, de
 	}
 
 	pageSize := readyWorkPageSize(filter.Limit)
-	orderBy := buildReadyWorkOrder(filter.SortPolicy)
+	orderBy := buildReadyWorkOrder(filter.SortPolicy, dialect)
 	ready := make([]*types.Issue, 0, filter.Limit)
 	for offset := 0; len(ready) < filter.Limit; offset += pageSize {
 		pageIDs, err := queryReadyWispIssueIDPage(ctx, tx, wispFilter, !filter.IncludeDeferred, orderBy, pageSize, offset, dialect)

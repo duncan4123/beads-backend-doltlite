@@ -3,6 +3,7 @@ package issueops
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/duncan4123/beads-backend-doltlite/internal/storage/sqlbuild"
@@ -176,13 +177,21 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 }
 
 // ParseTimeString parses a time string from database TEXT columns (non-nullable).
-// Supports RFC3339Nano, RFC3339, and MySQL DATETIME format.
+// Supports the Dolt/MySQL DATETIME layout plus the RFC3339 and DoltLite/SQLite
+// layouts observed when embedded drivers return timestamp values as text.
 func ParseTimeString(s string) time.Time {
+	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}
 	}
-	// Try RFC3339Nano first (more precise), then RFC3339, then DATETIME format
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	} {
 		if t, err := time.Parse(layout, s); err == nil {
 			return t
 		}

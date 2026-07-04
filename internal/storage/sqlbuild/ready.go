@@ -49,22 +49,29 @@ type ReadyWorkOrder struct {
 // ("created_at"/"priority") for per-table queries, or the sort_* aliases
 // ("sort_created"/"sort_priority") for UNION outer queries.
 func BuildReadyWorkOrder(policy types.SortPolicy, createdCol, priorityCol string) ReadyWorkOrder {
+	return BuildReadyWorkOrderDialect(policy, createdCol, priorityCol, CountsDialectDolt)
+}
+
+// BuildReadyWorkOrderDialect renders ready-work ordering with backend-specific
+// timestamp sort semantics.
+func BuildReadyWorkOrderDialect(policy types.SortPolicy, createdCol, priorityCol string, dialect CountsDialect) ReadyWorkOrder {
+	createdKey := CreatedAtColumnSortKey(dialect, createdCol)
 	switch policy {
 	case types.SortPolicyOldest:
-		return ReadyWorkOrder{SQL: fmt.Sprintf("ORDER BY %s ASC, id ASC", createdCol)}
+		return ReadyWorkOrder{SQL: fmt.Sprintf("ORDER BY %s ASC, id ASC", createdKey)}
 	case types.SortPolicyPriority:
-		return ReadyWorkOrder{SQL: fmt.Sprintf("ORDER BY %s ASC, %s DESC, id ASC", priorityCol, createdCol)}
+		return ReadyWorkOrder{SQL: fmt.Sprintf("ORDER BY %s ASC, %s DESC, id ASC", priorityCol, createdKey)}
 	case types.SortPolicyHybrid, "":
 		recentCutoff := time.Now().UTC().Add(-48 * time.Hour)
 		return ReadyWorkOrder{
 			SQL: fmt.Sprintf(`ORDER BY
 			CASE WHEN %s >= ? THEN 0 ELSE 1 END ASC,
 			CASE WHEN %s >= ? THEN %s ELSE 999 END ASC,
-			%s ASC, id ASC`, createdCol, createdCol, priorityCol, createdCol),
+			%s ASC, id ASC`, createdKey, createdKey, priorityCol, createdKey),
 			Args: []any{recentCutoff, recentCutoff},
 		}
 	default:
-		return ReadyWorkOrder{SQL: fmt.Sprintf("ORDER BY %s ASC, %s DESC, id ASC", priorityCol, createdCol)}
+		return ReadyWorkOrder{SQL: fmt.Sprintf("ORDER BY %s ASC, %s DESC, id ASC", priorityCol, createdKey)}
 	}
 }
 

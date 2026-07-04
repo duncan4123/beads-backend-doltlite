@@ -154,6 +154,26 @@ The smoke test initializes a temporary DoltLite-backed Beads workspace through
 the plugin process, writes plugin config metadata, then exercises representative
 `bd` commands through Beads core's process adapter.
 
+## DoltLite Remote Server Tests
+
+Use the local DoltLite remote server harness to exercise HTTP remotes in the
+test suite:
+
+```bash
+./scripts/test-doltlite-remotesrv.sh
+```
+
+The script auto-detects the DoltLite checkout at
+`/data/projects/doltlite-gascity/doltlite`, exports `DOLTLITE_REMOTESRV`, and
+links Go tests against the same local `libdoltlite`. Override detection with:
+
+```bash
+DOLTLITE_ROOT=/path/to/doltlite ./scripts/test-doltlite-remotesrv.sh
+```
+
+By default it runs the focused remote parity test. Pass normal `go test`
+arguments to run a different linked test target.
+
 ## Conformance
 
 The `conformance/` directory documents the intended upstream shape for backend

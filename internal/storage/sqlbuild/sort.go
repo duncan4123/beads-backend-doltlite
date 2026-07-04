@@ -77,6 +77,15 @@ func OrderByForColumns(sortBy string, sortDesc bool, col func(sortKey string) st
 // qualified ("i" -> "i.priority"). Ties always break by id ASC; the default
 // priority sort additionally breaks by created_at DESC.
 func OrderBy(sortBy string, sortDesc bool, table string) string {
+	return OrderByDialect(sortBy, sortDesc, table, CountsDialectDolt)
+}
+
+// OrderByDialect is OrderBy with backend-specific timestamp sort semantics.
+// SQLite/DoltLite can return and store multiple textual timestamp layouts for
+// the same logical DATETIME value. Created-at ordering therefore uses a
+// normalized second-granular key so SQL LIMIT cuts match Go-side parsed time
+// comparisons.
+func OrderByDialect(sortBy string, sortDesc bool, table string, dialect CountsDialect) string {
 	qual := ""
 	if table != "" {
 		qual = table + "."
@@ -87,9 +96,26 @@ func OrderBy(sortBy string, sortDesc bool, table string) string {
 			return qual + "id"
 		case "title":
 			return "LOWER(" + qual + "title)"
+		case "created":
+			return CreatedAtSortKey(dialect, qual)
 		}
 		return qual + SortDefs[k].Column
 	})
+}
+
+// CreatedAtSortKey returns the SQL expression used for created_at ordering in
+// the requested backend dialect.
+func CreatedAtSortKey(dialect CountsDialect, qualifier string) string {
+	return CreatedAtColumnSortKey(dialect, qualifier+"created_at")
+}
+
+// CreatedAtColumnSortKey returns the sort expression for an existing created_at
+// column or alias expression.
+func CreatedAtColumnSortKey(dialect CountsDialect, col string) string {
+	if dialect != CountsDialectSQLite {
+		return col
+	}
+	return "replace(substr(" + col + ", 1, 19), 'T', ' ')"
 }
 
 // Less is the Go-side mirror of OrderBy for merge sorts over rows fetched

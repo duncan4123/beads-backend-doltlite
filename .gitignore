@@ -1,6 +1,9 @@
 # Gas City
 .beads/*
 !.beads/identity.toml
+.codex/
 
 # Build outputs
 bin/
+dist/
+.cache/

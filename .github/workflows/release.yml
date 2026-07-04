@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "plugin-v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to publish, for example plugin-v20260705.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish plugin binaries
+    runs-on: ubuntu-latest
+    env:
+      DOLTLITE_VERSION: "0.11.23"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag_name }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+          case "$tag" in
+            plugin-v*) ;;
+            *) echo "release tag must match plugin-v*" >&2; exit 2 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Build release assets
+        run: scripts/build-release-assets.sh
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.tag.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null; then
+            git tag "${TAG_NAME}" "${GITHUB_SHA}"
+            git push origin "refs/tags/${TAG_NAME}"
+          fi
+          notes="DoltLite backend plugin binaries for ${TAG_NAME}.
+
+Assets:
+- bd-backend-doltlite_linux_amd64
+- gc-doltlite-fastpath_linux_amd64
+- gc-doltlite_linux_amd64
+- checksums.txt"
+          if gh release view "${TAG_NAME}" >/dev/null 2>&1; then
+            gh release upload "${TAG_NAME}" dist/* --clobber
+            gh release edit "${TAG_NAME}" --notes "${notes}" --prerelease
+          else
+            gh release create "${TAG_NAME}" dist/* --title "${TAG_NAME}" --notes "${notes}" --prerelease
+          fi

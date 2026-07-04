@@ -1,11 +1,17 @@
 # beads-backend-doltlite
 
-External Beads backend plugin that stores Beads data in DoltLite.
+External Beads backend plugin that stores Beads data in DoltLite, with a small
+Gas City companion surface for DoltLite-specific runtime layout decisions.
 
 This repository is the DoltLite proof implementation for the Beads backend
 plugin process architecture proposed in:
 
 - https://github.com/gastownhall/beads/pull/4561
+
+It is also the natural place for Gas City integration code that is specific to
+DoltLite. Gas City can continue to use its direct DoltLite fast paths where they
+matter, while Beads storage goes through the backend plugin and shared
+configuration remains inspectable by this repository.
 
 The plugin runs as a separate process and speaks the Beads backend protocol over
 stdio. Beads core remains responsible for CLI behavior, validation, hooks,
@@ -33,6 +39,20 @@ bd command
   -> plugin-process storage adapter
   -> bd-backend-doltlite over stdio
   -> DoltLite-backed storage
+```
+
+Gas City companion tools live beside the backend process:
+
+```text
+gc / Gas City init
+  -> .beads/metadata.json
+  -> gc-doltlite layout/health
+  -> table placement contract for DoltLite + attached SQLite ops DB
+
+gc runtime store access
+  -> Gas City backend capability adapter
+  -> Gas City backend plugin protocol over stdio
+  -> plugin-owned DoltLite store
 ```
 
 ## Build
@@ -65,7 +85,7 @@ GO_TAGS="libsqlite3 gms_pure_go"
 
 ## Commands
 
-The plugin binary supports:
+The Beads backend plugin binary supports:
 
 ```bash
 bd-backend-doltlite capabilities
@@ -118,6 +138,79 @@ BEADS_BACKEND_DOLTLITE_TRACE=/tmp/bd-backend-doltlite.jsonl bd-backend-doltlite 
 ```
 
 Use `BEADS_BACKEND_DOLTLITE_TRACE=off` to disable environment-driven tracing.
+
+## Gas City Companion
+
+The repository also builds a `gc-doltlite` helper. It is a read-only companion
+surface for Gas City code that needs DoltLite-specific knowledge without baking
+that knowledge directly into Gas City core.
+
+```bash
+go build -o ./bin/gc-doltlite ./cmd/gc-doltlite
+./bin/gc-doltlite --scope=/path/to/city layout
+./bin/gc-doltlite --scope=/path/to/city health
+```
+
+`gc-doltlite` reads `<scope>/.beads/metadata.json`, resolves the configured
+backend plugin command, finds the `ops` attached SQLite database, and emits the
+intended table layout as JSON.
+
+Supported profiles:
+
+- `ledger`: keep all synchronized issue and workflow state in DoltLite; use the
+  attached SQLite ops DB only for local caches, diagnostics, and metrics.
+- `local-runtime`: keep durable issue/config state in DoltLite and place local
+  Gas City workflow/runtime tables in attached SQLite.
+- `mirror`: use `local-runtime` table placement plus DoltLite mirror tables for
+  summarized runtime state that should travel with remotes.
+
+The default is `ledger`, which preserves the strongest cross-machine semantics.
+Gas City can opt into another profile in metadata:
+
+```json
+{
+  "backend": "doltlite",
+  "dolt_database": "gascity",
+  "backend_plugin_command": "/absolute/path/to/bd-backend-doltlite",
+  "backend_plugin_args": ["serve"],
+  "attached_databases": [
+    {"alias": "ops", "path": ".gc/ops.sqlite"}
+  ],
+  "gascity": {
+    "doltlite_profile": "ledger"
+  }
+}
+```
+
+This does not yet move tables by itself. It gives Gas City and the plugin a
+single contract for what a profile means before table routing is wired into the
+runtime paths.
+
+The repository also carries a process-owned Gas City backend implementation:
+
+```bash
+go build -o ./bin/gc-doltlite-fastpath ./cmd/gc-doltlite-fastpath
+./bin/gc-doltlite-fastpath capabilities
+./bin/gc-doltlite-fastpath serve
+```
+
+`gc-doltlite-fastpath` is the intended replacement for linking `gc` directly
+against `libdoltlite`. In the target shape, the `gc` binary stays unlinked and
+uses its backend capability adapter to talk to this long-lived plugin-owned
+process over newline-delimited JSON. The plugin process owns all direct DB
+access, including reads and writes, and is the only component that needs
+`libdoltlite`.
+
+The process speaks `gascity.backend.v1alpha1`, a backend-neutral protocol for
+Gas City internals that need direct store access without shelling through `bd`.
+The current surface exposes session open/close plus issue get, search,
+ready-work, wisp listing, counts, create/update/close/reopen/delete, storage
+tier create, conditional release, batched dependency reads, labels,
+dependencies, and metadata slot operations.
+
+Gas City has a pure-Go `beads.Store` client adapter for this protocol. The
+remaining direct-linked `DoltliteReadStore` code can become a fallback and then
+be removed as more backend-specific helper operations move into this protocol.
 
 ## Implemented Surface
 

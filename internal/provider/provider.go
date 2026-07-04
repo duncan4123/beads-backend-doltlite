@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -316,6 +317,77 @@ func (s *Session) GetConfig(ctx context.Context, key string) (string, error) {
 
 func (s *Session) GetAllConfig(ctx context.Context) (map[string]string, error) {
 	return s.Store.GetAllConfig(ctx)
+}
+
+func (s *Session) ExecuteRawSQL(ctx context.Context, query string) (backendplugin.RawSQLResult, error) {
+	db := s.Store.UnderlyingDB()
+	if db == nil {
+		return backendplugin.RawSQLResult{}, errors.New("underlying database not available")
+	}
+	if !rawSQLIsRead(query) {
+		result, err := db.ExecContext(ctx, query)
+		if err != nil {
+			return backendplugin.RawSQLResult{}, fmt.Errorf("exec error: %w", err)
+		}
+		affected, _ := result.RowsAffected()
+		return backendplugin.RawSQLResult{RowsAffected: affected, Read: false}, nil
+	}
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return backendplugin.RawSQLResult{}, fmt.Errorf("query error: %w", err)
+	}
+	defer rows.Close()
+
+	result, err := scanRawSQLRows(rows)
+	if err != nil {
+		return backendplugin.RawSQLResult{}, err
+	}
+	result.Read = true
+	return result, nil
+}
+
+func rawSQLIsRead(query string) bool {
+	trimmed := strings.TrimSpace(strings.ToUpper(query))
+	return strings.HasPrefix(trimmed, "SELECT") ||
+		strings.HasPrefix(trimmed, "EXPLAIN") ||
+		strings.HasPrefix(trimmed, "PRAGMA") ||
+		strings.HasPrefix(trimmed, "SHOW") ||
+		strings.HasPrefix(trimmed, "DESCRIBE") ||
+		strings.HasPrefix(trimmed, "WITH")
+}
+
+func scanRawSQLRows(rows *sql.Rows) (backendplugin.RawSQLResult, error) {
+	columns, err := rows.Columns()
+	if err != nil {
+		return backendplugin.RawSQLResult{}, fmt.Errorf("getting columns: %w", err)
+	}
+
+	allRows := make([]map[string]interface{}, 0)
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return backendplugin.RawSQLResult{}, fmt.Errorf("scanning row: %w", err)
+		}
+		row := make(map[string]interface{}, len(columns))
+		for i, col := range columns {
+			val := values[i]
+			if b, ok := val.([]byte); ok {
+				row[col] = string(b)
+			} else {
+				row[col] = val
+			}
+		}
+		allRows = append(allRows, row)
+	}
+	if err := rows.Err(); err != nil {
+		return backendplugin.RawSQLResult{}, fmt.Errorf("reading rows: %w", err)
+	}
+	return backendplugin.RawSQLResult{Columns: columns, Rows: allRows, Read: true}, nil
 }
 
 func (s *Session) DeleteConfig(ctx context.Context, key string) error {

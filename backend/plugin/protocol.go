@@ -159,6 +159,18 @@ type ConfigParams struct {
 	Value     string `json:"value,omitempty"`
 }
 
+type RawSQLParams struct {
+	SessionID string `json:"session_id"`
+	Query     string `json:"query"`
+}
+
+type RawSQLResult struct {
+	Columns      []string                 `json:"columns,omitempty"`
+	Rows         []map[string]interface{} `json:"rows,omitempty"`
+	RowsAffected int64                    `json:"rows_affected,omitempty"`
+	Read         bool                     `json:"read"`
+}
+
 type IssueTypeParams struct {
 	SessionID string    `json:"session_id"`
 	IssueType IssueType `json:"issue_type"`

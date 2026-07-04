@@ -381,6 +381,20 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 			return errorResponse(req.ID, "get_all_config_failed", err)
 		}
 		return ok(req.ID, values)
+	case "raw_sql":
+		var p backendplugin.RawSQLParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		result, err := s.ExecuteRawSQL(ctx, p.Query)
+		if err != nil {
+			return errorResponse(req.ID, "raw_sql_failed", err)
+		}
+		return ok(req.ID, result)
 	case "delete_config":
 		var p backendplugin.ConfigParams
 		if err := decode(req.Params, &p); err != nil {

@@ -620,6 +620,20 @@ func handle(ctx context.Context, manager *provider.Manager, req backendplugin.Re
 			return errorResponse(req.ID, "search_issues_failed", err)
 		}
 		return ok(req.ID, issues)
+	case "search_issues_with_counts":
+		var p backendplugin.SearchIssuesParams
+		if err := decode(req.Params, &p); err != nil {
+			return errorResponse(req.ID, "bad_params", err)
+		}
+		s, err := manager.Get(p.SessionID)
+		if err != nil {
+			return errorResponse(req.ID, "unknown_session", err)
+		}
+		issues, err := s.SearchIssuesWithCounts(ctx, p.Query, p.Filter)
+		if err != nil {
+			return errorResponse(req.ID, "search_issues_with_counts_failed", err)
+		}
+		return ok(req.ID, issues)
 	case "update_issue":
 		var p backendplugin.UpdateIssueParams
 		if err := decode(req.Params, &p); err != nil {

@@ -577,6 +577,10 @@ func (s *Session) SearchIssues(ctx context.Context, query string, filter backend
 	return s.Store.SearchIssues(ctx, query, filter)
 }
 
+func (s *Session) SearchIssuesWithCounts(ctx context.Context, query string, filter backendplugin.IssueFilter) ([]*backendplugin.IssueWithCounts, error) {
+	return s.Store.SearchIssuesWithCounts(ctx, query, filter)
+}
+
 func (s *Session) UpdateIssue(ctx context.Context, id string, updates map[string]interface{}, actor string, commit bool, message string) (*backendplugin.Issue, error) {
 	if actor == "" {
 		actor = "bd-backend-doltlite"

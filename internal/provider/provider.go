@@ -50,6 +50,7 @@ func Doctor() []Diagnostic {
 type Manager struct {
 	mu           sync.Mutex
 	sessions     map[string]*Session
+	stores       map[storeKey]*storeEntry
 	transactions map[string]*activeTransaction
 }
 
@@ -59,6 +60,19 @@ type Session struct {
 	Database string
 	Branch   string
 	Store    *backenddoltlite.DoltliteStore
+	storeRef *storeEntry
+}
+
+type storeKey struct {
+	beadsDir string
+	database string
+	branch   string
+}
+
+type storeEntry struct {
+	key   storeKey
+	store *backenddoltlite.DoltliteStore
+	refs  int
 }
 
 var errTransactionRollback = errors.New("transaction rolled back")
@@ -80,6 +94,7 @@ type transactionDecision struct {
 func NewManager() *Manager {
 	return &Manager{
 		sessions:     make(map[string]*Session),
+		stores:       make(map[storeKey]*storeEntry),
 		transactions: make(map[string]*activeTransaction),
 	}
 }
@@ -124,6 +139,12 @@ func (m *Manager) open(ctx context.Context, beadsDir, database, branch string, b
 	if err != nil {
 		return nil, err
 	}
+	if !bootstrap {
+		key := storeKey{beadsDir: absBeadsDir, database: database, branch: branch}
+		if s := m.acquireCachedSession(key); s != nil {
+			return s, nil
+		}
+	}
 	var opts []backenddoltlite.Option
 	if !bootstrap {
 		opts = append(opts, backenddoltlite.WithoutSchemaBootstrap())
@@ -141,9 +162,44 @@ func (m *Manager) open(ctx context.Context, beadsDir, database, branch string, b
 	}
 
 	m.mu.Lock()
+	if !bootstrap {
+		key := storeKey{beadsDir: absBeadsDir, database: database, branch: branch}
+		if existing, ok := m.stores[key]; ok {
+			existing.refs++
+			s.Store = existing.store
+			s.storeRef = existing
+			m.sessions[s.ID] = s
+			m.mu.Unlock()
+			_ = store.Close()
+			return s, nil
+		}
+		entry := &storeEntry{key: key, store: store, refs: 1}
+		m.stores[key] = entry
+		s.storeRef = entry
+	}
 	m.sessions[s.ID] = s
 	m.mu.Unlock()
 	return s, nil
+}
+
+func (m *Manager) acquireCachedSession(key storeKey) *Session {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry, ok := m.stores[key]
+	if !ok {
+		return nil
+	}
+	entry.refs++
+	s := &Session{
+		ID:       newSessionID(),
+		BeadsDir: key.beadsDir,
+		Database: key.database,
+		Branch:   key.branch,
+		Store:    entry.store,
+		storeRef: entry,
+	}
+	m.sessions[s.ID] = s
+	return s
 }
 
 func (m *Manager) Get(id string) (*Session, error) {
@@ -166,7 +222,23 @@ func (m *Manager) Close(id string) error {
 	if !ok {
 		return fmt.Errorf("unknown session: %s", id)
 	}
+	if s.storeRef != nil {
+		m.releaseCachedStore(s.storeRef)
+		return nil
+	}
 	return s.Store.Close()
+}
+
+func (m *Manager) releaseCachedStore(entry *storeEntry) {
+	m.mu.Lock()
+	entry.refs--
+	if entry.refs > 0 {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.stores, entry.key)
+	m.mu.Unlock()
+	_ = entry.store.Close()
 }
 
 func (m *Manager) CloseAll() error {
@@ -181,6 +253,11 @@ func (m *Manager) CloseAll() error {
 		delete(m.sessions, id)
 		sessions = append(sessions, s)
 	}
+	stores := make([]*storeEntry, 0, len(m.stores))
+	for key, entry := range m.stores {
+		delete(m.stores, key)
+		stores = append(stores, entry)
+	}
 	m.mu.Unlock()
 	var err error
 	for _, tx := range transactions {
@@ -189,7 +266,15 @@ func (m *Manager) CloseAll() error {
 		}
 	}
 	for _, s := range sessions {
+		if s.storeRef != nil {
+			continue
+		}
 		if closeErr := s.Store.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}
+	for _, entry := range stores {
+		if closeErr := entry.store.Close(); closeErr != nil {
 			err = errors.Join(err, closeErr)
 		}
 	}

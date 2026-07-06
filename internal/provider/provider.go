@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,6 +16,7 @@ import (
 
 	backendplugin "github.com/duncan4123/beads-backend-doltlite/backend/plugin"
 	backenddoltlite "github.com/duncan4123/beads-backend-doltlite/internal/storage/doltlite"
+	"gopkg.in/yaml.v3"
 )
 
 const Name = "doltlite"
@@ -114,7 +116,7 @@ func (m *Manager) Init(ctx context.Context, beadsDir, database, branch, prefix, 
 		_ = m.Close(s.ID)
 		return nil, fmt.Errorf("set issue_prefix: %w", err)
 	}
-	if err := s.Store.Commit(ctx, "bd init"); err != nil {
+	if err := s.Store.CommitWithConfig(ctx, "bd init"); err != nil {
 		_ = m.Close(s.ID)
 		return nil, fmt.Errorf("commit init: %w", err)
 	}
@@ -152,6 +154,12 @@ func (m *Manager) open(ctx context.Context, beadsDir, database, branch string, b
 	store, err := backenddoltlite.New(ctx, absBeadsDir, database, branch, opts...)
 	if err != nil {
 		return nil, err
+	}
+	if !bootstrap {
+		if err := ensureConfigFromFile(ctx, store, absBeadsDir); err != nil {
+			_ = store.Close()
+			return nil, err
+		}
 	}
 	s := &Session{
 		ID:       newSessionID(),
@@ -390,6 +398,170 @@ func (tx *activeTransaction) finish(ctx context.Context, decision transactionDec
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+func ensureConfigFromFile(ctx context.Context, store *backenddoltlite.DoltliteStore, beadsDir string) error {
+	cfg, ok, err := configValuesFromFile(beadsDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+
+	changed := false
+	if prefix := strings.TrimSpace(cfg.issuePrefix); prefix != "" {
+		current, err := store.GetConfig(ctx, "issue_prefix")
+		if err != nil {
+			return fmt.Errorf("read issue_prefix config: %w", err)
+		}
+		if strings.TrimSpace(current) == "" {
+			if err := store.SetConfig(ctx, "issue_prefix", prefix); err != nil {
+				return fmt.Errorf("repair issue_prefix config: %w", err)
+			}
+			changed = true
+		}
+	}
+	if customTypes := strings.TrimSpace(cfg.typesCustom); customTypes != "" {
+		current, err := store.GetConfig(ctx, "types.custom")
+		if err != nil {
+			return fmt.Errorf("read types.custom config: %w", err)
+		}
+		merged := mergeCommaLists(current, customTypes)
+		if merged != strings.TrimSpace(current) {
+			if err := store.SetConfig(ctx, "types.custom", merged); err != nil {
+				return fmt.Errorf("repair types.custom config: %w", err)
+			}
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	if err := store.CommitWithConfig(ctx, "repair config from config.yaml"); err != nil {
+		return fmt.Errorf("commit config repair: %w", err)
+	}
+	return nil
+}
+
+type configFileValues struct {
+	issuePrefix string
+	typesCustom string
+}
+
+func configValuesFromFile(beadsDir string) (configFileValues, bool, error) {
+	data, err := os.ReadFile(filepath.Join(beadsDir, "config.yaml"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return configFileValues{}, false, nil
+		}
+		return configFileValues{}, false, fmt.Errorf("read config.yaml for config repair: %w", err)
+	}
+	var cfg map[string]any
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return configFileValues{}, false, fmt.Errorf("parse config.yaml for config repair: %w", err)
+	}
+	values := configFileValues{}
+	if value, ok := lookupConfigValue(cfg, "issue-prefix", "issue_prefix"); ok {
+		prefix := strings.TrimSpace(fmt.Sprint(value))
+		if prefix != "" {
+			values.issuePrefix = strings.TrimSuffix(prefix, "-")
+		}
+	}
+	if value, ok := lookupConfigValue(cfg, "types.custom", "types_custom"); ok {
+		values.typesCustom = strings.Join(configStringList(value), ",")
+	}
+	return values, true, nil
+}
+
+func lookupConfigValue(cfg map[string]any, keys ...string) (any, bool) {
+	for _, key := range keys {
+		if value, ok := cfg[key]; ok {
+			return value, true
+		}
+		if strings.Contains(key, ".") {
+			if value, ok := lookupConfigPath(any(cfg), strings.Split(key, ".")); ok {
+				return value, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func lookupConfigPath(current any, path []string) (any, bool) {
+	if len(path) == 0 {
+		return current, true
+	}
+	key := path[0]
+	switch typed := current.(type) {
+	case map[string]any:
+		next, ok := typed[key]
+		if !ok {
+			return nil, false
+		}
+		return lookupConfigPath(next, path[1:])
+	case map[any]any:
+		next, ok := typed[key]
+		if !ok {
+			return nil, false
+		}
+		return lookupConfigPath(next, path[1:])
+	default:
+		return nil, false
+	}
+}
+
+func configStringList(value any) []string {
+	switch typed := value.(type) {
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, configStringList(item)...)
+		}
+		return out
+	case []string:
+		return typed
+	default:
+		return splitCommaList(fmt.Sprint(value))
+	}
+}
+
+func mergeCommaLists(current, required string) string {
+	return strings.Join(mergeStringLists(splitCommaList(current), splitCommaList(required)), ",")
+}
+
+func mergeStringLists(lists ...[]string) []string {
+	seen := make(map[string]struct{})
+	merged := make([]string, 0)
+	for _, list := range lists {
+		for _, value := range list {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			merged = append(merged, value)
+		}
+	}
+	return merged
+}
+
+func splitCommaList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func (s *Session) SetConfig(ctx context.Context, key, value string) error {

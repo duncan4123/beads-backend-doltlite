@@ -29,7 +29,7 @@ func BackendCapabilities() Capabilities {
 	return Capabilities{
 		Embedded:          true,
 		Transactions:      true,
-		RawSQL:            true,
+		RawSQL:            false,
 		Leases:            true,
 		Maintenance:       true,
 		Versioning:        true,

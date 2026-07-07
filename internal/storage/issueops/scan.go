@@ -31,6 +31,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	var issue types.Issue
 	var createdAtStr, updatedAtStr sql.NullString // scanned as strings, parsed with format fallbacks
 	var startedAt, closedAt, compactedAt, dueAt, deferUntil sql.NullTime
+	var leaseExpiresAt, heartbeatAt sql.NullTime // lease columns; NULL when no active lease
 	var estimatedMinutes, originalSize, timeoutNs sql.NullInt64
 	var createdBy sql.NullString
 	var assignee, externalRef, specID, compactedAtCommit, owner sql.NullString
@@ -53,6 +54,7 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 		&eventKind, &actor, &target, &payload,
 		&dueAt, &deferUntil,
 		&workType, &sourceSystem, &metadata,
+		&leaseExpiresAt, &heartbeatAt,
 	}
 	dests = append(dests, extra...)
 	if err := s.Scan(dests...); err != nil {
@@ -171,6 +173,12 @@ func ScanIssueFrom(s IssueScanner, extra ...any) (*types.Issue, error) {
 	// Custom metadata field (GH#1406)
 	if metadata.Valid && metadata.String != "" && metadata.String != "{}" {
 		issue.Metadata = []byte(metadata.String)
+	}
+	if leaseExpiresAt.Valid {
+		issue.LeaseExpiresAt = &leaseExpiresAt.Time
+	}
+	if heartbeatAt.Valid {
+		issue.HeartbeatAt = &heartbeatAt.Time
 	}
 
 	return &issue, nil

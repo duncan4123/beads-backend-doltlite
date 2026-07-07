@@ -20,6 +20,14 @@ func (s *DoltliteStore) SearchIssues(ctx context.Context, query string, filter t
 	return result, err
 }
 
+func (s *DoltliteStore) SearchIssueIDs(ctx context.Context, query string, filter types.IssueFilter) ([]string, error) {
+	issues, err := s.SearchIssues(ctx, query, filter)
+	if err != nil {
+		return nil, err
+	}
+	return issueIDsFromIssues(issues), nil
+}
+
 func (s *DoltliteStore) SearchIssuesWithCounts(ctx context.Context, query string, filter types.IssueFilter) ([]*types.IssueWithCounts, error) {
 	var result []*types.IssueWithCounts
 	err := s.withConn(ctx, false, func(tx *sql.Tx) error {
@@ -28,6 +36,16 @@ func (s *DoltliteStore) SearchIssuesWithCounts(ctx context.Context, query string
 		return err
 	})
 	return result, err
+}
+
+func issueIDsFromIssues(issues []*types.Issue) []string {
+	ids := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		if issue != nil {
+			ids = append(ids, issue.ID)
+		}
+	}
+	return ids
 }
 
 func (s *DoltliteStore) ListWisps(ctx context.Context, filter types.WispFilter) ([]*types.Issue, error) {

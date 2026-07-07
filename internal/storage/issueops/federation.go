@@ -37,11 +37,11 @@ func AddFederationPeerInTx(ctx context.Context, tx *sql.Tx, peer *storage.Federa
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO federation_peers (name, remote_url, username, password_encrypted, sovereignty)
 		VALUES (?, ?, ?, ?, ?)
-		ON DUPLICATE KEY UPDATE
-			remote_url = VALUES(remote_url),
-			username = VALUES(username),
-			password_encrypted = VALUES(password_encrypted),
-			sovereignty = VALUES(sovereignty),
+		ON CONFLICT(name) DO UPDATE SET
+			remote_url = excluded.remote_url,
+			username = excluded.username,
+			password_encrypted = excluded.password_encrypted,
+			sovereignty = excluded.sovereignty,
 			updated_at = CURRENT_TIMESTAMP
 	`, peer.Name, peer.RemoteURL, peer.Username, encryptedPwd, peer.Sovereignty)
 

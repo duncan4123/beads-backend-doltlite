@@ -50,6 +50,7 @@ type Storage interface {
 	DeleteIssue(ctx context.Context, id string) error
 	SearchIssues(ctx context.Context, query string, filter types.IssueFilter) ([]*types.Issue, error)
 	SearchIssuesWithCounts(ctx context.Context, query string, filter types.IssueFilter) ([]*types.IssueWithCounts, error)
+	SearchIssueIDs(ctx context.Context, query string, filter types.IssueFilter) ([]string, error)
 
 	// Dependencies
 	AddDependency(ctx context.Context, dep *types.Dependency, actor string) error
@@ -337,6 +338,7 @@ type Transaction interface {
 	DeleteIssue(ctx context.Context, id string) error
 	GetIssue(ctx context.Context, id string) (*types.Issue, error)                                    // For read-your-writes within transaction
 	SearchIssues(ctx context.Context, query string, filter types.IssueFilter) ([]*types.Issue, error) // For read-your-writes within transaction
+	SearchIssueIDs(ctx context.Context, query string, filter types.IssueFilter) ([]string, error)     // For read-your-writes within transaction
 
 	// Dependency operations
 	AddDependency(ctx context.Context, dep *types.Dependency, actor string) error

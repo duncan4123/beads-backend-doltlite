@@ -72,10 +72,22 @@ func (s *DoltliteStore) CreateIssuesWithFullOptions(ctx context.Context, issues 
 		if err != nil {
 			return err
 		}
+		accepted := issues[:0:0]
 		for _, issue := range issues {
 			if err := createIssueSQLite(ctx, tx, bc, issue, actor); err != nil {
 				return err
 			}
+			accepted = append(accepted, issue)
+		}
+		if _, err := issueops.PersistDependenciesWithOptionsResult(ctx, tx, accepted, actor, opts); err != nil {
+			return err
+		}
+		if _, err := issueops.ReconcileChildCounters(ctx, tx, accepted); err != nil {
+			return err
+		}
+		issueIDs, wispIDs := issueops.CreateBlockedRecomputeIDsForSQLite(accepted)
+		if err := issueops.RecomputeIsBlockedSQLiteInTx(ctx, tx, issueIDs, wispIDs); err != nil {
+			return err
 		}
 		return nil
 	})

@@ -110,7 +110,7 @@ func backfillCustomTypes(ctx context.Context, db DBConn) (bool, error) {
 		if name == "" {
 			continue
 		}
-		res, err := db.ExecContext(ctx, "INSERT IGNORE INTO custom_types (name) VALUES (?)", name)
+		res, err := db.ExecContext(ctx, "INSERT OR IGNORE INTO custom_types (name) VALUES (?)", name)
 		if err != nil {
 			return wrote, fmt.Errorf("inserting type %q: %w", name, err)
 		}
@@ -149,7 +149,7 @@ func backfillCustomStatuses(ctx context.Context, db DBConn) (bool, error) {
 	}
 	wrote := false
 	for _, s := range parsed {
-		res, err := db.ExecContext(ctx, "INSERT IGNORE INTO custom_statuses (name, category) VALUES (?, ?)", s.Name, string(s.Category))
+		res, err := db.ExecContext(ctx, "INSERT OR IGNORE INTO custom_statuses (name, category) VALUES (?, ?)", s.Name, string(s.Category))
 		if err != nil {
 			return wrote, fmt.Errorf("inserting status %q: %w", s.Name, err)
 		}

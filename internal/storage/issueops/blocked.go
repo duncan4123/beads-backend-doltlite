@@ -190,7 +190,7 @@ func GetDescendantIDsInTx(ctx context.Context, tx DBTX, rootID string, maxDepth 
 				FROM parent_edges e
 				JOIN descendants d ON e.depends_on_id = d.id
 				WHERE (? <= 0 OR d.depth < ?)
-				  AND LOCATE(CONCAT(',', e.issue_id, ','), d.path) = 0
+				  AND INSTR(d.path, CONCAT(',', e.issue_id, ',')) = 0
 			)
 			SELECT id, depth FROM descendants WHERE id <> ?
 		`, edgeQuery)

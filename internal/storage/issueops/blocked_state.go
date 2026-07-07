@@ -374,13 +374,17 @@ func unmarkBlockedTemplateForWisps() string {
 func sqliteBlockedTemplate(tmpl string) string {
 	replacer := strings.NewReplacer(
 		"UPDATE issues i SET i.is_blocked = 1, i.updated_at = i.updated_at",
-		"UPDATE issues AS i SET is_blocked = 1, updated_at = updated_at",
+		"UPDATE issues SET is_blocked = 1, updated_at = updated_at",
 		"UPDATE issues i SET i.is_blocked = 0, i.updated_at = i.updated_at",
-		"UPDATE issues AS i SET is_blocked = 0, updated_at = updated_at",
+		"UPDATE issues SET is_blocked = 0, updated_at = updated_at",
 		"UPDATE wisps w SET w.is_blocked = 1, w.updated_at = w.updated_at",
-		"UPDATE wisps AS w SET is_blocked = 1, updated_at = updated_at",
+		"UPDATE wisps SET is_blocked = 1, updated_at = updated_at",
 		"UPDATE wisps w SET w.is_blocked = 0, w.updated_at = w.updated_at",
-		"UPDATE wisps AS w SET is_blocked = 0, updated_at = updated_at",
+		"UPDATE wisps SET is_blocked = 0, updated_at = updated_at",
+		" i.",
+		" issues.",
+		" w.",
+		" wisps.",
 		"JSON_UNQUOTE(JSON_EXTRACT(d.metadata, '$.gate'))",
 		"JSON_EXTRACT(d.metadata, '$.gate')",
 	)

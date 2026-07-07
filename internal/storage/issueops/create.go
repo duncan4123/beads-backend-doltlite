@@ -401,6 +401,10 @@ func createBlockedRecomputeIDs(issues []*types.Issue) ([]string, []string) {
 	return issueIDs, wispIDs
 }
 
+func CreateBlockedRecomputeIDsForSQLite(issues []*types.Issue) ([]string, []string) {
+	return createBlockedRecomputeIDs(issues)
+}
+
 // PrepareIssueForInsert normalizes timestamps, validates, and computes the content hash.
 func PrepareIssueForInsert(issue *types.Issue, customStatuses, customTypes []string) error {
 	if err := ValidateMetadataIfConfigured(issue.Metadata); err != nil {
@@ -581,7 +585,7 @@ func PersistLabels(ctx context.Context, tx *sql.Tx, issue *types.Issue, actor, e
 		seen[label] = struct{}{}
 		//nolint:gosec // G201: table is determined by ephemeral flag
 		sqlResult, err := tx.ExecContext(ctx, fmt.Sprintf(`
-			INSERT IGNORE INTO %s (issue_id, label)
+			INSERT OR IGNORE INTO %s (issue_id, label)
 			VALUES (?, ?)
 		`, labelTable), issue.ID, label)
 		if err != nil {
@@ -720,7 +724,7 @@ func PersistDependenciesWithOptionsResult(ctx context.Context, tx *sql.Tx, issue
 			sqlResult, err := tx.ExecContext(ctx, fmt.Sprintf(`
 					INSERT INTO %s (id, issue_id, %s, type, created_by, created_at)
 					VALUES (?, ?, ?, ?, ?, ?)
-					ON DUPLICATE KEY UPDATE type = type
+					ON CONFLICT(id) DO NOTHING
 				`, depTable, kind.Column()), depid.New(dep.IssueID, dep.DependsOnID), dep.IssueID, dep.DependsOnID, dep.Type, createdBy, createdAt)
 			if err != nil {
 				return result, fmt.Errorf("failed to insert dependency %s -> %s: %w", dep.IssueID, dep.DependsOnID, err)
@@ -826,8 +830,8 @@ func ReconcileChildCounters(ctx context.Context, tx *sql.Tx, issues []*types.Iss
 		//nolint:gosec // G201: table is one of two hardcoded constants.
 		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 			INSERT INTO %s (parent_id, last_child) VALUES (?, ?)
-			ON DUPLICATE KEY UPDATE last_child = GREATEST(last_child, ?)
-		`, table), parentID, b.maxChild, b.maxChild); err != nil {
+			ON CONFLICT(parent_id) DO UPDATE SET last_child = MAX(last_child, excluded.last_child)
+		`, table), parentID, b.maxChild); err != nil {
 			return nil, fmt.Errorf("failed to reconcile child counter for %s: %w", parentID, err)
 		}
 		if changed == nil {

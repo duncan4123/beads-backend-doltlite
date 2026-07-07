@@ -83,6 +83,28 @@ CGO_ENABLED=1
 GO_TAGS="libsqlite3 gms_pure_go"
 ```
 
+## Conformance Testing
+
+The release gate for this plugin lives in the Beads repository. Build this
+plugin, point `BEADS_DOLTLITE_PLUGIN_COMMAND` at the resulting binary, and run
+the `doltlite-plugin` end-to-end conformance profile from Beads:
+
+```bash
+OUT=/tmp/bd-backend-doltlite-conformance ./scripts/build.sh
+
+cd /data/projects/doltlite-gascity/beads-doltlite
+BEADS_DOLTLITE_PLUGIN_COMMAND=/tmp/bd-backend-doltlite-conformance \
+BEADS_DOLTLITE_PLUGIN_ARGS=serve \
+BEADS_CONFORMANCE_PROFILES=doltlite-plugin \
+CGO_ENABLED=1 \
+go test -tags 'gms_pure_go e2e' ./test/conformance/ -timeout 90m -count=1
+```
+
+The test builds a real `bd`, initializes both the embedded Dolt reference and
+this plugin backend, runs the same CLI scenarios, and requires normalized output
+to match. A full run currently takes about 15 minutes. See
+`conformance/README.md` for the focused iteration command.
+
 ## Commands
 
 The Beads backend plugin binary supports:

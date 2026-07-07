@@ -1130,7 +1130,7 @@ func (s *DoltliteStore) UpdateIssueID(ctx context.Context, oldID, newID string, 
 
 func (s *DoltliteStore) PromoteFromEphemeral(ctx context.Context, id string, actor string) error {
 	return s.withConn(ctx, true, func(tx *sql.Tx) error {
-		return issueops.PromoteFromEphemeralInTx(ctx, tx, id, actor)
+		return issueops.PromoteFromEphemeralSQLiteInTx(ctx, tx, id, actor)
 	})
 }
 

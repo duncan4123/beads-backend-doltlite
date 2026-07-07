@@ -347,11 +347,11 @@ func GetRepoMtimeInTx(ctx context.Context, tx *sql.Tx, repoPath string) (int64, 
 func SetRepoMtimeInTx(ctx context.Context, tx *sql.Tx, repoPath, jsonlPath string, mtimeNs int64) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO repo_mtimes (repo_path, jsonl_path, mtime_ns, last_checked)
-		VALUES (?, ?, ?, NOW())
-		ON DUPLICATE KEY UPDATE
-			jsonl_path = VALUES(jsonl_path),
-			mtime_ns = VALUES(mtime_ns),
-			last_checked = NOW()
+		VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+		ON CONFLICT(repo_path) DO UPDATE SET
+			jsonl_path = excluded.jsonl_path,
+			mtime_ns = excluded.mtime_ns,
+			last_checked = CURRENT_TIMESTAMP
 	`, repoPath, jsonlPath, mtimeNs)
 	if err != nil {
 		return fmt.Errorf("set repo mtime: %w", err)

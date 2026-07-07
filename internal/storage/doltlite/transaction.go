@@ -114,6 +114,14 @@ func (t *embeddedTransaction) SearchIssues(ctx context.Context, query string, fi
 	return issueops.SearchIssuesInTx(ctx, t.tx, query, filter)
 }
 
+func (t *embeddedTransaction) SearchIssueIDs(ctx context.Context, query string, filter types.IssueFilter) ([]string, error) {
+	issues, err := t.SearchIssues(ctx, query, filter)
+	if err != nil {
+		return nil, err
+	}
+	return issueIDsFromIssues(issues), nil
+}
+
 func (t *embeddedTransaction) AddDependency(ctx context.Context, dep *types.Dependency, actor string) error {
 	return t.AddDependencyWithOptions(ctx, dep, actor, storage.DependencyAddOptions{})
 }

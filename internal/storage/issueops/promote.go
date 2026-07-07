@@ -10,6 +10,15 @@ import (
 
 //nolint:gosec // G201: table names are hardcoded constants
 func PromoteFromEphemeralInTx(ctx context.Context, tx *sql.Tx, id string, actor string) error {
+	return promoteFromEphemeralInTx(ctx, tx, id, actor, false)
+}
+
+func PromoteFromEphemeralSQLiteInTx(ctx context.Context, tx *sql.Tx, id string, actor string) error {
+	return promoteFromEphemeralInTx(ctx, tx, id, actor, true)
+}
+
+//nolint:gosec // G201: table names are hardcoded constants
+func promoteFromEphemeralInTx(ctx context.Context, tx *sql.Tx, id string, actor string, sqlite bool) error {
 	if !IsActiveWispInTx(ctx, tx, id) {
 		return fmt.Errorf("wisp %s not found", id)
 	}
@@ -38,7 +47,7 @@ func PromoteFromEphemeralInTx(ctx context.Context, tx *sql.Tx, id string, actor 
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT IGNORE INTO labels (issue_id, label)
+		INSERT OR IGNORE INTO labels (issue_id, label)
 		SELECT issue_id, label FROM wisp_labels WHERE issue_id = ?
 	`, id); err != nil {
 		return fmt.Errorf("copy labels for promoted wisp %s: %w", id, err)
@@ -53,7 +62,7 @@ func PromoteFromEphemeralInTx(ctx context.Context, tx *sql.Tx, id string, actor 
 	// DEFAULT mint a fresh random one) keeps the promoted edge merge-safe and is
 	// required now that dependencies.id has no DEFAULT (#4259).
 	if _, err := tx.ExecContext(ctx, `
-		INSERT IGNORE INTO dependencies (id, issue_id, depends_on_issue_id, depends_on_wisp_id, depends_on_external, type, created_at, created_by, metadata, thread_id)
+		INSERT OR IGNORE INTO dependencies (id, issue_id, depends_on_issue_id, depends_on_wisp_id, depends_on_external, type, created_at, created_by, metadata, thread_id)
 		SELECT id, issue_id, depends_on_issue_id, depends_on_wisp_id, depends_on_external, type, created_at, created_by, metadata, thread_id
 		FROM wisp_dependencies WHERE issue_id = ?
 	`, id); err != nil {
@@ -64,7 +73,7 @@ func PromoteFromEphemeralInTx(ctx context.Context, tx *sql.Tx, id string, actor 
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT IGNORE INTO events (id, issue_id, event_type, actor, old_value, new_value, comment, created_at)
+		INSERT OR IGNORE INTO events (id, issue_id, event_type, actor, old_value, new_value, comment, created_at)
 		SELECT id, issue_id, event_type, actor, old_value, new_value, comment, created_at
 		FROM wisp_events WHERE issue_id = ?
 	`, id); err != nil {
@@ -75,7 +84,7 @@ func PromoteFromEphemeralInTx(ctx context.Context, tx *sql.Tx, id string, actor 
 	}
 
 	if _, err := tx.ExecContext(ctx, `
-		INSERT IGNORE INTO comments (id, issue_id, author, text, created_at)
+		INSERT OR IGNORE INTO comments (id, issue_id, author, text, created_at)
 		SELECT id, issue_id, author, text, created_at
 		FROM wisp_comments WHERE issue_id = ?
 	`, id); err != nil {
@@ -105,8 +114,14 @@ func PromoteFromEphemeralInTx(ctx context.Context, tx *sql.Tx, id string, actor 
 	if aerr != nil {
 		return fmt.Errorf("affected by promote for %s: %w", id, aerr)
 	}
-	if err := RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps); err != nil {
-		return fmt.Errorf("recompute is_blocked after promote for %s: %w", id, err)
+	var recomputeErr error
+	if sqlite {
+		recomputeErr = RecomputeIsBlockedSQLiteInTx(ctx, tx, affectedIssues, affectedWisps)
+	} else {
+		recomputeErr = RecomputeIsBlockedInTx(ctx, tx, affectedIssues, affectedWisps)
+	}
+	if recomputeErr != nil {
+		return fmt.Errorf("recompute is_blocked after promote for %s: %w", id, recomputeErr)
 	}
 	return nil
 }

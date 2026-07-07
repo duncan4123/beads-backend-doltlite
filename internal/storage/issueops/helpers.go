@@ -82,9 +82,9 @@ func issueUpsertAssignments(rejectStaleUpdate bool) string {
 	for _, col := range issueUpsertColumns {
 		if rejectStaleUpdate {
 			assignments = append(assignments,
-				fmt.Sprintf("%s = IF(VALUES(updated_at) > updated_at, VALUES(%s), %s)", col, col, col))
+				fmt.Sprintf("%s = CASE WHEN excluded.updated_at > updated_at THEN excluded.%s ELSE %s END", col, col, col))
 		} else {
-			assignments = append(assignments, fmt.Sprintf("%s = VALUES(%s)", col, col))
+			assignments = append(assignments, fmt.Sprintf("%s = excluded.%s", col, col))
 		}
 	}
 	return strings.Join(assignments, ",\n\t\t\t")
@@ -120,7 +120,7 @@ func insertIssueIntoTable(ctx context.Context, tx *sql.Tx, table string, issue *
 			?, ?, ?, ?,
 			?, ?, ?
 		)
-		ON DUPLICATE KEY UPDATE
+		ON CONFLICT(id) DO UPDATE SET
 			%s
 	`, table, issueUpsertAssignments(rejectStaleUpdate)),
 		issue.ID, issue.ContentHash, issue.Title, issue.Description, issue.Design, issue.AcceptanceCriteria, issue.Notes,

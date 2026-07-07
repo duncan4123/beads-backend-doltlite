@@ -53,8 +53,8 @@ func GetNextChildIDTx(ctx context.Context, tx *sql.Tx, parentID string) (string,
 	//nolint:gosec // G201: counterTable is one of two hardcoded constants.
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
 		INSERT INTO %s (parent_id, last_child) VALUES (?, ?)
-		ON DUPLICATE KEY UPDATE last_child = ?
-	`, counterTable), parentID, nextChild, nextChild); err != nil {
+		ON CONFLICT(parent_id) DO UPDATE SET last_child = excluded.last_child
+	`, counterTable), parentID, nextChild); err != nil {
 		return "", fmt.Errorf("get next child ID: update counter: %w", err)
 	}
 

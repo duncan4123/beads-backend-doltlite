@@ -33,7 +33,7 @@ const isBlockedRecomputePendingKey = "is_blocked_recompute_pending"
 // MarkIsBlockedRecomputePendingInTx records a failed post-merge recompute so
 // the next RecomputeIsBlockedAfterMergeInTx retries with a widened window. It
 // must run in its OWN transaction — the failed recompute's tx is rolling back.
-// INSERT IGNORE on purpose: when a marker from an earlier failure exists, its
+// INSERT OR IGNORE on purpose: when a marker from an earlier failure exists, its
 // older fromCommit covers a superset of this one's window and must win.
 func MarkIsBlockedRecomputePendingInTx(ctx context.Context, tx *sql.Tx, fromCommit string) error {
 	value := fromCommit
@@ -41,7 +41,7 @@ func MarkIsBlockedRecomputePendingInTx(ctx context.Context, tx *sql.Tx, fromComm
 		value = "full"
 	}
 	_, err := tx.ExecContext(ctx,
-		"INSERT IGNORE INTO metadata (`key`, value) VALUES (?, ?)",
+		"INSERT OR IGNORE INTO metadata (`key`, value) VALUES (?, ?)",
 		isBlockedRecomputePendingKey, value)
 	return err
 }

@@ -130,7 +130,7 @@ func getLabelsIntoFromTable(ctx context.Context, tx DBTX, labelTable string, ids
 
 // AddLabelInTx adds a label to an issue and records an event within an existing
 // transaction. Automatically routes to wisp tables if the ID is an active wisp.
-// Uses INSERT IGNORE for idempotency.
+// Uses INSERT OR IGNORE for idempotency.
 func AddLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID, label, actor string) error {
 	if labelTable == "" || eventTable == "" {
 		isWisp := IsActiveWispInTx(ctx, tx, issueID)
@@ -143,7 +143,7 @@ func AddLabelInTx(ctx context.Context, tx DBTX, labelTable, eventTable, issueID,
 		}
 	}
 	//nolint:gosec // G201: labelTable is from WispTableRouting ("labels" or "wisp_labels")
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`INSERT IGNORE INTO %s (issue_id, label) VALUES (?, ?)`, labelTable), issueID, label); err != nil {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`INSERT OR IGNORE INTO %s (issue_id, label) VALUES (?, ?)`, labelTable), issueID, label); err != nil {
 		return fmt.Errorf("add label: %w", err)
 	}
 	comment := "Added label: " + label

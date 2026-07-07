@@ -235,7 +235,7 @@ func AllMigrationsSQL() string {
 		}
 		b.WriteString(cliCompatibleMigrationSQL(f.name, string(data)))
 		sum := sha256.Sum256(data)
-		fmt.Fprintf(&b, "\nINSERT IGNORE INTO %s (version, content_hash) VALUES (%d, '%s');\n",
+		fmt.Fprintf(&b, "\nINSERT OR IGNORE INTO %s (version, content_hash) VALUES (%d, '%s');\n",
 			mainSource.cursorTable, f.version, hex.EncodeToString(sum[:]))
 	}
 	return b.String()
@@ -993,7 +993,7 @@ func (m migrationSource) migrate(ctx context.Context, db DBConn, upTo int) (int,
 		}
 		sum := sha256.Sum256(data)
 		contentHash := hex.EncodeToString(sum[:])
-		if _, err := db.ExecContext(ctx, "INSERT IGNORE INTO "+m.cursorTable+" (version, content_hash) VALUES (?, ?)", mf.version, contentHash); err != nil {
+		if _, err := db.ExecContext(ctx, "INSERT OR IGNORE INTO "+m.cursorTable+" (version, content_hash) VALUES (?, ?)", mf.version, contentHash); err != nil {
 			return count, columnAdded, fmt.Errorf("recording %s in %s: %w", mf.name, m.cursorTable, err)
 		}
 		count++

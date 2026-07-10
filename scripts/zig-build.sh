@@ -187,6 +187,26 @@ run_tests() {
   set -e
   [ "$companion_rc" -eq 2 ] || die "gc-doltlite without a command returned $companion_rc, want 2"
   [[ "$companion_usage" == usage:* ]] || die "gc-doltlite did not emit usage"
+
+  smoke_root="$OUTPUT_ROOT/smoke/doltlite-client"
+  smoke_db="$smoke_root/client.db"
+  rm -rf "$smoke_root"
+  mkdir -p "$smoke_root"
+  "$OUTPUT_ROOT/bin/doltlite-client" --db "$smoke_db" exec \
+    "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT NOT NULL, qty INTEGER NOT NULL); CREATE INDEX items_name_idx ON items(name)"
+  "$OUTPUT_ROOT/bin/doltlite-client" --db "$smoke_db" exec \
+    "INSERT INTO items(name, qty) VALUES (?, ?)" widget 7
+  query_output="$("$OUTPUT_ROOT/bin/doltlite-client" --db "$smoke_db" query \
+    "SELECT name, qty FROM items WHERE name = ?" widget)"
+  [[ "$query_output" == *$'widget\t7'* ]] || die "doltlite-client query smoke failed"
+  "$OUTPUT_ROOT/bin/doltlite-client" --db "$smoke_db" exec "REINDEX"
+  integrity_output="$("$OUTPUT_ROOT/bin/doltlite-client" --db "$smoke_db" query \
+    "PRAGMA integrity_check")"
+  [[ "$integrity_output" == *$'integrity_check\nok'* ]] || die "doltlite-client integrity smoke failed"
+  version_output="$("$OUTPUT_ROOT/bin/doltlite-client" --db "$smoke_db" query \
+    "SELECT dolt_version()")"
+  [[ "$version_output" == *"v$DOLTLITE_VERSION"* ]] || die "doltlite-client version smoke failed"
+  rm -rf "$smoke_root"
 }
 
 json_escape() {
@@ -233,7 +253,7 @@ write_provenance() {
     printf '  "libdoltlite_sha256": "%s",\n' "$library_sha"
     printf '  "binaries": {\n'
     first=true
-    for name in bd-backend-doltlite gc-doltlite-fastpath gc-doltlite; do
+    for name in bd-backend-doltlite gc-doltlite-fastpath gc-doltlite doltlite-client; do
       path="$OUTPUT_ROOT/bin/$name"
       [ -x "$path" ] || die "missing plugin binary: $path"
       sha="$(sha256sum "$path" | awk '{print $1}')"

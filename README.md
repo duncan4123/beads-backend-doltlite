@@ -88,8 +88,9 @@ GO_TAGS="libsqlite3 gms_pure_go"
 The Zig build is the reproducible native-link path for plugin development and
 release experiments. It downloads the DoltLite release recorded in
 `build/doltlite.lock`, verifies the archive checksum, then uses `zig cc` as the
-CGO compiler and linker while building all three Go binaries. It does not build
-DoltLite itself. The currently locked Zig version is 0.16.0:
+CGO compiler and linker while building the three plugin binaries and the raw
+SQL diagnostic client. It does not build DoltLite itself. The currently locked
+Zig version is 0.16.0:
 
 ```bash
 zig build
@@ -101,7 +102,16 @@ Outputs are written under `zig-out/`:
 zig-out/bin/bd-backend-doltlite
 zig-out/bin/gc-doltlite-fastpath
 zig-out/bin/gc-doltlite
+zig-out/bin/doltlite-client
 zig-out/build-provenance.json
+```
+
+The client resolves a Gas City scope through `.beads/metadata.json`, or accepts
+a direct database path, and executes arbitrary SQL:
+
+```bash
+zig-out/bin/doltlite-client --scope /path/to/rig query "SELECT * FROM issues"
+zig-out/bin/doltlite-client --db /path/to/file.db exec "REINDEX"
 ```
 
 To use an already installed or downloaded library, provide its directory:

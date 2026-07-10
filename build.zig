@@ -9,6 +9,7 @@ const binaries = [_]Binary{
     .{ .name = "bd-backend-doltlite", .package = "./cmd/bd-backend-doltlite" },
     .{ .name = "gc-doltlite-fastpath", .package = "./cmd/gc-doltlite-fastpath" },
     .{ .name = "gc-doltlite", .package = "./cmd/gc-doltlite" },
+    .{ .name = "doltlite-client", .package = "./cmd/doltlite-client" },
 };
 
 pub fn build(b: *std.Build) void {
@@ -49,7 +50,7 @@ pub fn build(b: *std.Build) void {
     const provenance = command(b, &.{"provenance"}, doltlite_lib, cache_root, output_root, go_exe);
     for (binary_runs) |run| provenance.step.dependOn(&run.step);
 
-    const plugins_step = b.step("plugins", "Build all DoltLite backend plugin binaries");
+    const plugins_step = b.step("plugins", "Build all DoltLite backend plugin binaries and clients");
     plugins_step.dependOn(&provenance.step);
     b.getInstallStep().dependOn(plugins_step);
 

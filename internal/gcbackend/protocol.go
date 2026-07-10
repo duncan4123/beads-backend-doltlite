@@ -90,12 +90,15 @@ type CreateIssueParams struct {
 }
 
 type UpdateIssueParams struct {
-	SessionID string                 `json:"session_id"`
-	ID        string                 `json:"id"`
-	Updates   map[string]interface{} `json:"updates"`
-	Actor     string                 `json:"actor,omitempty"`
-	Commit    bool                   `json:"commit,omitempty"`
-	Message   string                 `json:"message,omitempty"`
+	SessionID    string                 `json:"session_id"`
+	ID           string                 `json:"id"`
+	Updates      map[string]interface{} `json:"updates"`
+	AddLabels    []string               `json:"add_labels,omitempty"`
+	RemoveLabels []string               `json:"remove_labels,omitempty"`
+	ParentID     *string                `json:"parent_id,omitempty"`
+	Actor        string                 `json:"actor,omitempty"`
+	Commit       bool                   `json:"commit,omitempty"`
+	Message      string                 `json:"message,omitempty"`
 }
 
 type IssueActionParams struct {

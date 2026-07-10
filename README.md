@@ -57,7 +57,7 @@ gc runtime store access
 
 ## Build
 
-The plugin links against a DoltLite shared library. Point `DOLTLITE_LIB` at the
+The plugin links against a DoltLite native library. Point `DOLTLITE_LIB` at the
 directory containing that library:
 
 ```bash
@@ -82,6 +82,44 @@ The build script uses these defaults unless overridden:
 CGO_ENABLED=1
 GO_TAGS="libsqlite3 gms_pure_go"
 ```
+
+### Zig Native Build
+
+The Zig build is the reproducible native-link path for plugin development and
+release experiments. It downloads the DoltLite release recorded in
+`build/doltlite.lock`, verifies the archive checksum, then uses `zig cc` as the
+CGO compiler and linker while building all three Go binaries. It does not build
+DoltLite itself. The currently locked Zig version is 0.16.0:
+
+```bash
+zig build
+```
+
+Outputs are written under `zig-out/`:
+
+```text
+zig-out/bin/bd-backend-doltlite
+zig-out/bin/gc-doltlite-fastpath
+zig-out/bin/gc-doltlite
+zig-out/build-provenance.json
+```
+
+To use an already installed or downloaded library, provide its directory:
+
+```bash
+zig build -Ddoltlite-lib=/path/to/doltlite-lib
+```
+
+Run the focused linked regression suite with the same native library:
+
+```bash
+zig build test
+```
+
+The default build rejects an archive with a different checksum and rejects a
+Zig version other than the version in the lock file. Updating DoltLite is
+therefore an explicit release URL and checksum change rather than accidental
+reuse of an unknown native archive.
 
 ## Conformance Testing
 

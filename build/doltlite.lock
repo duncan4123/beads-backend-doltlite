@@ -1,0 +1,5 @@
+# Updated deliberately when the plugin adopts a new DoltLite release.
+DOLTLITE_VERSION=0.11.28
+DOLTLITE_LINUX_X64_ASSET=doltlite-lib-linux-x64-0.11.28.zip
+DOLTLITE_LINUX_X64_SHA256=56bb7c08e64340f52112396c326822db702a81138b8ca09c5e9874c64d32ffed
+ZIG_VERSION=0.16.0

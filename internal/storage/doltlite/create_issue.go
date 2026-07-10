@@ -30,7 +30,18 @@ func (s *DoltliteStore) CreateIssue(ctx context.Context, issue *types.Issue, act
 		if err != nil {
 			return err
 		}
-		return createIssueSQLite(ctx, tx, bc, issue, actor)
+		if err := createIssueSQLite(ctx, tx, bc, issue, actor); err != nil {
+			return err
+		}
+		issues := []*types.Issue{issue}
+		if _, err := issueops.PersistDependenciesWithOptionsResult(ctx, tx, issues, actor, bc.Opts); err != nil {
+			return err
+		}
+		if _, err := issueops.ReconcileChildCounters(ctx, tx, issues); err != nil {
+			return err
+		}
+		issueIDs, wispIDs := issueops.CreateBlockedRecomputeIDsForSQLite(issues)
+		return issueops.RecomputeIsBlockedSQLiteInTx(ctx, tx, issueIDs, wispIDs)
 	})
 }
 

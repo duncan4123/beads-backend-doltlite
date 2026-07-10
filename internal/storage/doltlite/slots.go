@@ -15,11 +15,9 @@ func (s *DoltliteStore) SlotSet(ctx context.Context, issueID, key, value, actor 
 		return fmt.Errorf("getting issue %s: %w", issueID, err)
 	}
 
-	metadata := make(map[string]interface{})
-	if len(issue.Metadata) > 0 {
-		if err := json.Unmarshal(issue.Metadata, &metadata); err != nil {
-			return fmt.Errorf("parsing metadata for %s: %w", issueID, err)
-		}
+	metadata, err := decodeSlotMetadata(issue.Metadata, issueID)
+	if err != nil {
+		return err
 	}
 	metadata[key] = value
 
@@ -30,6 +28,22 @@ func (s *DoltliteStore) SlotSet(ctx context.Context, issueID, key, value, actor 
 
 	updates := map[string]interface{}{"metadata": string(raw)}
 	return s.UpdateIssue(ctx, issueID, updates, actor)
+}
+
+func decodeSlotMetadata(raw json.RawMessage, issueID string) (map[string]interface{}, error) {
+	metadata := make(map[string]interface{})
+	if len(raw) == 0 {
+		return metadata, nil
+	}
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return nil, fmt.Errorf("parsing metadata for %s: %w", issueID, err)
+	}
+	// JSON null unmarshals into a nil map without an error. Normalize it before
+	// SlotSet assigns a key so legacy null metadata cannot panic the server.
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	return metadata, nil
 }
 
 // SlotGet retrieves the value of a metadata key from an issue.

@@ -278,6 +278,8 @@ func sanitizeTraceText(s string, limit int) string {
 
 func handle(ctx context.Context, manager *provider.Manager, req gcbackend.Request) gcbackend.Response {
 	switch req.Method {
+	case "ping":
+		return okResponse(req.ID, map[string]bool{"ok": true})
 	case "open":
 		var p gcbackend.OpenParams
 		if err := decode(req.Params, &p); err != nil {
@@ -334,7 +336,7 @@ func handle(ctx context.Context, manager *provider.Manager, req gcbackend.Reques
 		if err != nil {
 			return storageError(req.ID, err)
 		}
-		issue, err := session.UpdateIssue(ctx, p.ID, p.Updates, p.Actor, p.Commit, p.Message)
+		issue, err := session.ApplyIssueUpdate(ctx, p.ID, p.Updates, p.AddLabels, p.RemoveLabels, p.ParentID, p.Actor, p.Commit, p.Message)
 		if err != nil {
 			return storageError(req.ID, err)
 		}
@@ -510,11 +512,11 @@ func handle(ctx context.Context, manager *provider.Manager, req gcbackend.Reques
 		if err != nil {
 			return storageError(req.ID, err)
 		}
-		issues, err := session.GetDependencies(ctx, p.IssueID)
+		deps, err := session.GetDependencyRecords(ctx, p.IssueID)
 		if err != nil {
 			return storageError(req.ID, err)
 		}
-		return okResponse(req.ID, issues)
+		return okResponse(req.ID, deps)
 	case "get_dependents":
 		var p gcbackend.DependencyParams
 		if err := decode(req.Params, &p); err != nil {
@@ -524,11 +526,19 @@ func handle(ctx context.Context, manager *provider.Manager, req gcbackend.Reques
 		if err != nil {
 			return storageError(req.ID, err)
 		}
-		issues, err := session.GetDependents(ctx, p.IssueID)
+		all, err := session.GetAllDependencyRecords(ctx)
 		if err != nil {
 			return storageError(req.ID, err)
 		}
-		return okResponse(req.ID, issues)
+		deps := make([]any, 0)
+		for _, records := range all {
+			for _, dep := range records {
+				if dep != nil && dep.DependsOnID == p.IssueID {
+					deps = append(deps, dep)
+				}
+			}
+		}
+		return okResponse(req.ID, deps)
 	case "slot_set":
 		var p gcbackend.MetadataSlotParams
 		if err := decode(req.Params, &p); err != nil {

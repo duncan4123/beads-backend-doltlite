@@ -15,6 +15,7 @@ import (
 	"time"
 
 	backendplugin "github.com/duncan4123/beads-backend-doltlite/backend/plugin"
+	"github.com/duncan4123/beads-backend-doltlite/internal/storage"
 	backenddoltlite "github.com/duncan4123/beads-backend-doltlite/internal/storage/doltlite"
 	"gopkg.in/yaml.v3"
 )
@@ -765,6 +766,66 @@ func (s *Session) UpdateIssue(ctx context.Context, id string, updates map[string
 		return nil, err
 	}
 	if err := s.Store.UpdateIssue(ctx, id, updates, actor); err != nil {
+		return nil, err
+	}
+	if commit {
+		if message == "" {
+			message = "update issue " + id
+		}
+		if err := s.Store.Commit(ctx, message); err != nil {
+			return nil, err
+		}
+	}
+	return s.Store.GetIssue(ctx, id)
+}
+
+// ApplyIssueUpdate applies row fields and label deltas as one storage transaction.
+// Labels are deltas, matching Gas City's UpdateOpts contract; they are never a
+// replacement set.
+func (s *Session) ApplyIssueUpdate(ctx context.Context, id string, updates map[string]interface{}, addLabels, removeLabels []string, parentID *string, actor string, commit bool, message string) (*backendplugin.Issue, error) {
+	if actor == "" {
+		actor = "bd-backend-doltlite"
+	}
+	if err := NormalizeUpdatePayload(updates); err != nil {
+		return nil, err
+	}
+	err := s.Store.RunInTransaction(ctx, message, func(tx storage.Transaction) error {
+		if len(updates) > 0 {
+			if err := tx.UpdateIssue(ctx, id, updates, actor); err != nil {
+				return err
+			}
+		}
+		for _, label := range addLabels {
+			if err := tx.AddLabel(ctx, id, label, actor); err != nil {
+				return err
+			}
+		}
+		for _, label := range removeLabels {
+			if err := tx.RemoveLabel(ctx, id, label, actor); err != nil {
+				return err
+			}
+		}
+		if parentID != nil {
+			records, err := tx.GetDependencyRecords(ctx, id)
+			if err != nil {
+				return err
+			}
+			for _, dep := range records {
+				if dep != nil && dep.Type == "parent-child" {
+					if err := tx.RemoveDependency(ctx, id, dep.DependsOnID, actor); err != nil {
+						return err
+					}
+				}
+			}
+			if *parentID != "" {
+				if err := tx.AddDependency(ctx, &backendplugin.Dependency{IssueID: id, DependsOnID: *parentID, Type: "parent-child"}, actor); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	if commit {
